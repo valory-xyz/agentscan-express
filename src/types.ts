@@ -1,11 +1,18 @@
-import { User } from "./services/messages";
-
 export interface Channel {
   id: number;
   server_id: string;
   name: string;
   is_thread: boolean;
   parent_channel_id?: string;
+}
+
+export interface User {
+  id: string; // Use string for UUID
+  username: string;
+  pfp?: string; // Optional profile picture
+  bio?: string; // Optional bio
+  created_at: Date;
+  updated_at: Date;
 }
 
 export interface EmojiReaction {

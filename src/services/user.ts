@@ -1,6 +1,6 @@
 import { pool } from "../initalizers/postgres";
 import { redis } from "../initalizers/redis";
-import { User } from "./messages";
+import { User } from "../types";
 
 export const user_cache_key = (userId: string) => `user:${userId}`;
 
