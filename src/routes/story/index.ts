@@ -1,5 +1,5 @@
 import express from "express";
-import anthropic from "../../initalizers/anthropic";
+import openai from "../../initalizers/openai";
 
 const router = express.Router();
 
@@ -128,7 +128,7 @@ Previous content:
 ${previousContent}
 
 Instructions:
-1. Write the next segment of the story in 4-6 detailed sentences, focusing on character development, interactions, and the challenges posed by the ${biome}.
+1. Write the next segment of the story in 1-3 detailed sentences, focusing on character development, interactions, and the challenges posed by the ${biome}.
 2. Develop complex relationships and alliances between characters.
 3. If appropriate, eliminate one character dramatically and meaningfully.
 4. Incorporate twists, surprises, and moral dilemmas.
@@ -153,11 +153,11 @@ Remember to maintain a balance between action, dialogue, and introspection to cr
 
     while (true) {
       try {
-        const stream = await anthropic.messages.create({
-          model: "claude-3-sonnet-20240229",
-          max_tokens: 4096,
+        const stream = await openai.chat.completions.create({
+          model: "chatgpt-4o-latest", // Or another appropriate OpenAI model
           messages: [{ role: "user", content: storyPrompt }],
           stream: true,
+          max_tokens: 1000,
         });
 
         return stream;
@@ -194,71 +194,62 @@ Remember to maintain a balance between action, dialogue, and introspection to cr
       let currentStatusContent = "";
 
       for await (const chunk of stream) {
-        if (
-          chunk.type === "content_block_start" ||
-          chunk.type === "content_block_delta"
-        ) {
-          const content =
-            chunk.type === "content_block_delta" && "text" in chunk.delta
-              ? chunk.delta.text
-              : "";
+        const content = chunk.choices[0]?.delta?.content || "";
+        if (content) {
+          contentBuffer += content;
 
-          if (content) {
-            contentBuffer += content;
-
-            // Process story sections
-            if (contentBuffer.includes("[STORY]")) {
-              if (currentStoryContent) {
-                // Send previous story segment
-                sendMessage({
-                  type: "story",
-                  content: currentStoryContent.trim(),
-                });
-                currentStoryContent = "";
-              }
-              currentSection = "story";
-              contentBuffer = contentBuffer.split("[STORY]").pop() || "";
-            }
-
-            if (
-              currentSection === "story" &&
-              contentBuffer.includes("[/STORY]")
-            ) {
-              const [storyContent] = contentBuffer.split("[/STORY]");
-              currentStoryContent = storyContent.trim();
-              contentBuffer = contentBuffer.split("[/STORY]").pop() || "";
-              currentSection = null;
-
-              // Send story content immediately
+          // Process story sections
+          if (contentBuffer.includes("[STORY]")) {
+            if (currentStoryContent) {
+              // Send previous story segment
               sendMessage({
                 type: "story",
-                content: currentStoryContent,
+                content: currentStoryContent.trim(),
               });
+              currentStoryContent = "";
             }
+            currentSection = "story";
+            contentBuffer = contentBuffer.split("[STORY]").pop() || "";
+          }
 
-            // Process status sections
-            if (contentBuffer.includes("[STATUS]")) {
-              currentSection = "status";
-              contentBuffer = contentBuffer.split("[STATUS]").pop() || "";
-            }
+          if (
+            currentSection === "story" &&
+            contentBuffer.includes("[/STORY]")
+          ) {
+            const [storyContent] = contentBuffer.split("[/STORY]");
+            currentStoryContent = storyContent.trim();
+            contentBuffer = contentBuffer.split("[/STORY]").pop() || "";
+            currentSection = null;
 
-            if (
-              currentSection === "status" &&
-              contentBuffer.includes("[/STATUS]")
-            ) {
-              const [statusContent] = contentBuffer.split("[/STATUS]");
-              currentStatusContent = statusContent.trim();
-              contentBuffer = contentBuffer.split("[/STATUS]").pop() || "";
+            // Send story content immediately
+            sendMessage({
+              type: "story",
+              content: currentStoryContent,
+            });
+          }
 
-              // Process and send status update
-              const updatedStatus = processStatusUpdate(currentStatusContent);
-              sendMessage({
-                type: "status",
-                characterStatus: updatedStatus,
-              });
+          // Process status sections
+          if (contentBuffer.includes("[STATUS]")) {
+            currentSection = "status";
+            contentBuffer = contentBuffer.split("[STATUS]").pop() || "";
+          }
 
-              currentSection = null;
-            }
+          if (
+            currentSection === "status" &&
+            contentBuffer.includes("[/STATUS]")
+          ) {
+            const [statusContent] = contentBuffer.split("[/STATUS]");
+            currentStatusContent = statusContent.trim();
+            contentBuffer = contentBuffer.split("[/STATUS]").pop() || "";
+
+            // Process and send status update
+            const updatedStatus = processStatusUpdate(currentStatusContent);
+            sendMessage({
+              type: "status",
+              characterStatus: updatedStatus,
+            });
+
+            currentSection = null;
           }
         }
       }
@@ -291,43 +282,34 @@ Remember to maintain a balance between action, dialogue, and introspection to cr
       [/STORY]
     `;
 
-    const epilogueStream = await anthropic.messages.create({
-      model: "claude-3-5-sonnet-latest",
-      max_tokens: 4096,
+    const epilogueStream = await openai.chat.completions.create({
+      model: "gpt-4", // Or another appropriate OpenAI model
       messages: [{ role: "user", content: epiloguePrompt }],
       stream: true,
+      max_tokens: 300, // Adjust as needed
     });
 
     let epilogueContent = "";
 
     for await (const chunk of epilogueStream) {
-      if (
-        chunk.type === "content_block_start" ||
-        chunk.type === "content_block_delta"
-      ) {
-        const content =
-          chunk.type === "content_block_delta" && "text" in chunk.delta
-            ? chunk.delta.text
-            : "";
+      const content = chunk.choices[0]?.delta?.content || "";
+      if (content) {
+        epilogueContent += content;
 
-        if (content) {
-          epilogueContent += content;
+        if (epilogueContent.includes("[STORY]")) {
+          epilogueContent = epilogueContent.split("[STORY]").pop() || "";
+        }
 
-          if (epilogueContent.includes("[STORY]")) {
-            epilogueContent = epilogueContent.split("[STORY]").pop() || "";
-          }
+        if (epilogueContent.includes("[/STORY]")) {
+          const [storyContent] = epilogueContent.split("[/STORY]");
+          epilogueContent = storyContent.trim();
 
-          if (epilogueContent.includes("[/STORY]")) {
-            const [storyContent] = epilogueContent.split("[/STORY]");
-            epilogueContent = storyContent.trim();
+          sendMessage({
+            type: "story",
+            content: epilogueContent,
+          });
 
-            sendMessage({
-              type: "story",
-              content: epilogueContent,
-            });
-
-            break;
-          }
+          break;
         }
       }
     }
