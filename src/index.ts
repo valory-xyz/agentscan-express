@@ -14,9 +14,6 @@ import { Socket } from "socket.io";
 
 dotenv.config();
 
-const ONLINE_STATUS_TTL = 3600; // 1 hour in seconds
-const HEARTBEAT_INTERVAL = 300000; // 5 minutes in milliseconds
-
 const app = express();
 const httpServer = createServer(app);
 
@@ -28,10 +25,8 @@ initializeSocket(httpServer);
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
-//this should work on localhost
 app.use(cors());
 
-// Routes
 app.use("/", require("./routes").default);
 
 // Initialize the server

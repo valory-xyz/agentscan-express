@@ -43,3 +43,41 @@ export interface Message {
   parent_preview?: Message; // Add this line
   wallet_address?: string; // Add this line
 }
+
+export interface Character {
+  id: string;
+  name: string;
+  description: string | null;
+  imageUrl: string;
+  status: "active" | "eliminated";
+  seasonId: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CreateCharacterDto {
+  name: string;
+  description?: string;
+  imageUrl: string;
+}
+
+export interface Season {
+  id: string;
+  name: string;
+  isCurrent: boolean;
+  isPlaying: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SeasonState {
+  id: string;
+  isPlaying: boolean;
+}
+
+// Add error type for character creation
+export interface CharacterError {
+  code: string;
+  message: string;
+  details?: string;
+}

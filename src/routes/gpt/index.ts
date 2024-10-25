@@ -1,5 +1,5 @@
 import express from "express";
-import supabase from "../../config/supabaseClient";
+import supabase from "../../initalizers/supabaseClient";
 
 const router = express.Router();
 

@@ -1,54 +1,39 @@
 import express from "express";
 import openai from "../../initalizers/openai";
+import {
+  getCurrentSeasonAndCharacters,
+  standardizeCharacterName,
+} from "../../services/story";
 
 const router = express.Router();
 
-const CHARACTERS = [
-  "Luna the shapeshifter",
-  "Zephyr the wind mage",
-  "Blaze the fire elemental",
-  "Frost the ice archer",
-  "Terra the earth bender",
-  "Volt the lightning ninja",
-  "Aqua the water manipulator",
-  "Shadow the stealth assassin",
-  "Flora the plant whisperer",
-  "Nova the cosmic warrior",
-] as const;
-
-type CharacterName = (typeof CHARACTERS)[number];
-
 interface CharacterState {
-  characters: Map<CharacterName, boolean>;
+  characters: Map<string, boolean>;
   remainingCount: number;
 }
-
-const initialState: CharacterState = {
-  characters: new Map(CHARACTERS.map((char) => [char, true])),
-  remainingCount: CHARACTERS.length,
-};
 
 interface MessageQueue {
   type: "story" | "status";
   content?: string;
   characterStatus?: {
-    remainingCharacters: CharacterName[];
-    eliminatedCharacters: CharacterName[];
+    remainingCharacters: string[];
+    eliminatedCharacters: string[];
   };
 }
 
 router.get("/", async (req, res) => {
   const biome = (req.query.biome as string) || "tropical rainforest";
 
+  const { characters } = await getCurrentSeasonAndCharacters();
   // Initialize character state
   const characterState: CharacterState = {
-    characters: new Map(CHARACTERS.map((char) => [char, true])),
-    remainingCount: CHARACTERS.length,
+    characters: new Map(characters.map((char) => [char.name, true])),
+    remainingCount: characters.length,
   };
 
   const getCharacterStatus = () => {
-    const remainingCharacters: CharacterName[] = [];
-    const eliminatedCharacters: CharacterName[] = [];
+    const remainingCharacters: string[] = [];
+    const eliminatedCharacters: string[] = [];
 
     characterState.characters.forEach((isActive, character) => {
       if (isActive) {
@@ -62,13 +47,6 @@ router.get("/", async (req, res) => {
       remainingCharacters: remainingCharacters.sort(),
       eliminatedCharacters: eliminatedCharacters.sort(),
     };
-  };
-
-  const standardizeCharacterName = (name: string): CharacterName | null => {
-    const standardized = CHARACTERS.find(
-      (char) => char.toLowerCase() === name.toLowerCase().trim()
-    );
-    return standardized || null;
   };
 
   const sendMessage = (message: MessageQueue) => {
@@ -93,16 +71,16 @@ router.get("/", async (req, res) => {
       : [];
 
     const activeCharacters = activeCharactersRaw
-      .map(standardizeCharacterName)
-      .filter((char): char is CharacterName => char !== null);
+      .map((char) => standardizeCharacterName(char, characters))
+      .filter((char): char is string => char !== null);
     const eliminatedCharacters = eliminatedCharactersRaw
-      .map(standardizeCharacterName)
-      .filter((char): char is CharacterName => char !== null);
+      .map((char) => standardizeCharacterName(char, characters))
+      .filter((char): char is string => char !== null);
 
     // Update character state
-    CHARACTERS.forEach((character) => {
-      const isCurrentlyActive = characterState.characters.get(character);
-      const isListedEliminated = eliminatedCharacters.includes(character);
+    characters.forEach((character) => {
+      const isCurrentlyActive = characterState.characters.get(character.name);
+      const isListedEliminated = eliminatedCharacters.includes(character.name);
 
       if (isCurrentlyActive && isListedEliminated) {
         // Only change to eliminated if currently active and explicitly listed as eliminated
@@ -119,10 +97,16 @@ router.get("/", async (req, res) => {
     return getCharacterStatus();
   };
 
-  const generateStorySegment = async (previousContent: string = "") => {
+  const generateStorySegment = async (
+    characters: any[],
+    previousContent: string = ""
+  ) => {
+    const strings = characters.map(
+      (char) => `name: ${char.name} description: (${char.description})`
+    );
     const storyPrompt = `
 You are a master storyteller crafting an epic battle royale narrative set in a ${biome}. Continue the story with the following characters:
-${CHARACTERS.map((char, index) => `${index + 1}. ${char}`).join("\n")}
+${strings.map((char, index) => `${index + 1}. ${char}`).join("\n")}
 
 Previous content:
 ${previousContent}
@@ -186,7 +170,7 @@ Remember to maintain a balance between action, dialogue, and introspection to cr
     let isStoryComplete = false;
 
     while (!isStoryComplete) {
-      const stream = await generateStorySegment(previousContent);
+      const stream = await generateStorySegment(characters, previousContent);
 
       let contentBuffer = "";
       let currentSection: "story" | "status" | null = null;
