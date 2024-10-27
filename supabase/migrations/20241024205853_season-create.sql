@@ -20,6 +20,7 @@ begin
     'name', new_season.name,
     'isCurrent', new_season.is_current,
     'createdAt', new_season.created_at,
+    'biome', new_season.biome,
     'updatedAt', new_season.updated_at
   );
 end;

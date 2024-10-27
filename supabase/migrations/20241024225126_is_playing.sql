@@ -1,6 +1,4 @@
--- First, add the is_playing column to seasons
-alter table public.seasons
-add column is_playing boolean default false;
+
 
 -- Create a function to check if characters can be created
 create or replace function can_create_character()

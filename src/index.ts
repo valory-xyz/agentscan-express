@@ -11,6 +11,7 @@ import { getUsersByIds } from "./services/user";
 import { removeUserOnline, setUserOnline } from "./services/onlineStatus";
 import dotenv from "dotenv";
 import { Socket } from "socket.io";
+import { startStoryGeneratorCron } from "./cron/storyGenerator";
 
 dotenv.config();
 
@@ -28,6 +29,9 @@ app.use(express.urlencoded({ limit: "10mb", extended: true }));
 app.use(cors());
 
 app.use("/", require("./routes").default);
+
+// Start the cron job
+startStoryGeneratorCron();
 
 // Initialize the server
 async function initServer(): Promise<void> {

@@ -3,7 +3,7 @@ create type character_status as enum ('active', 'eliminated');
 
 create table if not exists characters (
   id uuid default gen_random_uuid() primary key,
-  name varchar(255) not null,
+  name text not null,
   description text,
   image_url text not null,
   status character_status default 'active',
