@@ -4,6 +4,11 @@ import { query } from "../initializers/postgres";
 import { config } from "../config";
 import { standardizeCharacterName } from "../services/story";
 import openai from "../initalizers/openai";
+import {
+  generateAndUploadImage,
+  generateAndUploadGIF,
+  generateImagePrompt,
+} from "../services/image";
 
 interface MessageQueue {
   type: "story" | "status";
@@ -65,20 +70,50 @@ async function getCurrentStory(seasonId: string) {
   return result.rows[0] || null;
 }
 
+// Update the story segment generation to include image generation
 async function addStorySegment(
   seasonId: string,
   content: string,
-  imageUrl?: string
+  biome: string,
+  generatedImagePrompt: string | undefined = undefined,
+  retryAttempt: number = 0
 ) {
   const latestStoryResult = await query(
     "SELECT page FROM public.stories WHERE season_id = $1 ORDER BY page DESC LIMIT 1",
     [seasonId]
   );
+
   const latestStory = latestStoryResult.rows[0];
   const newPage = latestStory ? latestStory.page + 1 : 1;
+
+  let generatedImageUrl: string | undefined = "";
+  let generatedVideoUrl: string | undefined = "";
+  let imagePrompt: string | undefined = generatedImagePrompt;
+  if (!imagePrompt) {
+    imagePrompt = await generateImagePrompt(content, biome);
+  }
+  // Generate image prompt and image
+  imagePrompt = await generateImagePrompt(imagePrompt, biome);
+  //try generating a video url
+  generatedImageUrl = await generateAndUploadGIF(imagePrompt);
+  //if that fails, generate an image
+  if (!generatedImageUrl) {
+    generatedImageUrl = await generateAndUploadImage(imagePrompt);
+  }
+
+  //if both fail, don't save the story and retry
+  if (!generatedImageUrl) {
+    retryAttempt++;
+    if (retryAttempt > 5) {
+      console.error("Failed to generate image and video after 5 retries");
+      return;
+    }
+    await addStorySegment(seasonId, content, biome, imagePrompt, retryAttempt);
+  }
+
   await query(
-    "INSERT INTO public.stories (content, image_url, season_id, page) VALUES ($1, $2, $3, $4)",
-    [content, imageUrl, seasonId, newPage]
+    "INSERT INTO public.stories (content, image_url, video_url, season_id, page) VALUES ($1, $2, $3, $4, $5)",
+    [content, generatedImageUrl, generatedVideoUrl, seasonId, newPage]
   );
 }
 
@@ -265,7 +300,7 @@ async function generateStory() {
 
       // Process story content
       if (currentStoryContent) {
-        await addStorySegment(season.id, currentStoryContent);
+        await addStorySegment(season.id, currentStoryContent, biome);
       }
 
       // Process status content

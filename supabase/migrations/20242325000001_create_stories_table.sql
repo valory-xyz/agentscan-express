@@ -6,7 +6,8 @@ CREATE TABLE public.stories (
   season_id UUID REFERENCES public.seasons(id) ON DELETE CASCADE,
   page INTEGER NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  video_url TEXT
 );
 
 -- Create index on season_id and page for faster queries
