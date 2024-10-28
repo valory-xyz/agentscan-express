@@ -119,7 +119,7 @@ Remember to maintain perfect formatting and eliminate at least one character in 
   while (true) {
     try {
       const stream = await openai.chat.completions.create({
-        model: "chatgpt-4o-latest", // Or another appropriate OpenAI model
+        model: "gpt-4o-mini", // Or another appropriate OpenAI model
         messages: [{ role: "user", content: storyPrompt }],
         stream: true,
         max_tokens: 1000,

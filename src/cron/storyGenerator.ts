@@ -92,6 +92,7 @@ async function addStorySegment(
   if (!imagePrompt) {
     imagePrompt = await generateImagePrompt(content, biome);
   }
+
   // Generate image prompt and image
   imagePrompt = await generateImagePrompt(imagePrompt, biome);
   //try generating a video url
@@ -234,7 +235,7 @@ ELIMINATED: List eliminated characters here using their EXACT full names, comma-
 `.trim();
 
   const stream = await openai.chat.completions.create({
-    model: "gpt-4o",
+    model: "gpt-4o-mini",
     messages: [{ role: "user", content: storyPrompt }],
     stream: true,
     max_tokens: 500,

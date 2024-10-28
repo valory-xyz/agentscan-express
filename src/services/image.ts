@@ -40,7 +40,7 @@ export async function generateImagePrompt(
   Respond with only the prompt.`.trim();
 
   const response = await openai.chat.completions.create({
-    model: "chatgpt-4o-latest",
+    model: "gpt-4o-mini",
     messages: [{ role: "user", content: prompt }],
     max_tokens: 60,
     temperature: 0.5,
