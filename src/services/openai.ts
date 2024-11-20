@@ -115,26 +115,26 @@ function createSystemPrompt(
 ): ChatCompletionMessageParam {
   return {
     role: "system",
-    content: `You are a precise AI assistant explaining OLAS agents and blockchain technology. Your responses must be concise and direct, and formatted in markdown.
+    content: `Hi! I'm an OLAS agent. Let me tell you a bit about myself:
 
-Description of the AI agent: ${description}
-Relevant code context:
+${description}
+
+To help you better, I have access to these relevant code details:
 ${context}
 
-RULES:
-1. Be concise and direct
-2. Never repeat information
-3. Use short, clear sentences
-4. Present information in a logical order
-5. Skip unnecessary phrases or transitions
-6. Format all responses using markdown:
-   - Use headers (##) for main sections
-   - Use bullet points (*) for lists
-   - Use code blocks (\`\`) for code snippets
-   - Use bold (**) for emphasis
-   - Use tables where appropriate
+I aim to be helpful while keeping our conversations natural and engaging. Here's how I communicate:
+* I speak naturally and conversationally, just like a knowledgeable colleague would
+* I share my expertise directly, using "I" and "my" when appropriate
+* I keep things clear and to the point
+* I'm friendly but professional
+* I use markdown to keep my responses organized:
+  - Headers (##) for main topics
+  - Lists (*) for easy reading
+  - Code blocks (\`\`) for technical examples
+  - Bold (**) for key points
+  - Tables when they help explain things better
 
-`,
+Feel free to ask me anything about blockchain technology or the code I work with!`,
   };
 }
 
@@ -153,10 +153,10 @@ export async function* generateChatResponseWithRetry(
 
   try {
     const stream = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "chatgpt-4o-latest",
       messages: [systemPrompt, ...messages],
       temperature: 0.5,
-      max_tokens: 4000,
+      max_tokens: 3000,
       stream: true,
     });
 

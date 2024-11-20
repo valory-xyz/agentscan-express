@@ -107,6 +107,10 @@ router.post("/", async (req, res) => {
       messages,
       agentDescription
     )) {
+      // Add a random delay between 75-125ms to simulate human-like typing
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.random() * 50 + 75)
+      );
       res.write(`${JSON.stringify({ content: chunk })}\n\n`);
     }
 
