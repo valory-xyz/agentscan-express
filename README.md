@@ -3,4 +3,4 @@
 ## Getting started
 
 ### Run locally
-supabase start && npm run dev
+npm run dev
