@@ -109,7 +109,6 @@ function calculateSimilarity(str1: string, str2: string): number {
   return intersection.size / union.size;
 }
 
-// Create reusable system prompt generator
 function createSystemPrompt(
   context: string,
   description: string
