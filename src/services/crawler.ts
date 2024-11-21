@@ -391,8 +391,8 @@ async function processDocument(
       // Single embedding case
       const result = await safeQueueOperation(async () => {
         return await dbQueue.add(async () => {
-          await executeQuery(async (client) => {
-            await client.query(
+          return await executeQuery(async (client) => {
+            const res = await client.query(
               `INSERT INTO context_embeddings (
                 id,
                 company_id,
@@ -407,7 +407,8 @@ async function processDocument(
               ON CONFLICT (id, type, location) DO UPDATE SET
                 content = EXCLUDED.content,
                 embedding = EXCLUDED.embedding,
-                updated_at = NOW()`,
+                updated_at = NOW()
+              RETURNING id`,
               [
                 hash,
                 organization_id,
@@ -418,25 +419,26 @@ async function processDocument(
                 embeddings,
               ]
             );
+            return res.rows.length > 0;
           });
         });
       });
       console.log(`Processed document: ${normalizedUrl}`, result);
-      return result !== null;
+      return result === true;
     } else {
       // Multiple chunks case
       const chunks = splitTextIntoChunks(cleanedCodeContent, MAX_TOKENS);
       const results = await Promise.allSettled(
         chunks.map((chunk, i) =>
           safeQueueOperation(async () => {
-            const chunkLocation = `${url}#chunk${i + 1}`; // Create unique location for each chunk
+            const chunkLocation = `${url}#chunk${i + 1}`;
             const chunkHash = crypto
               .createHash("sha256")
               .update(chunkLocation)
               .digest("hex");
             return await dbQueue.add(async () => {
-              await executeQuery(async (client) => {
-                await client.query(
+              return await executeQuery(async (client) => {
+                const res = await client.query(
                   `INSERT INTO context_embeddings (
                     id,
                     company_id,
@@ -455,19 +457,21 @@ async function processDocument(
                     embedding = EXCLUDED.embedding,
                     is_chunk = EXCLUDED.is_chunk,
                     original_location = EXCLUDED.original_location,
-                    updated_at = NOW()`,
+                    updated_at = NOW()
+                  RETURNING id`,
                   [
-                    chunkHash, // Unique hash for each chunk
+                    chunkHash,
                     organization_id,
                     "document",
-                    chunkLocation, // Unique location for each chunk
+                    chunkLocation,
                     chunk,
-                    `${url} (Part ${i + 1})`, // Descriptive name for each chunk
+                    `${url} (Part ${i + 1})`,
                     embeddings[i],
                     true,
                     url,
                   ]
                 );
+                return res.rows.length > 0;
               });
             });
           })
