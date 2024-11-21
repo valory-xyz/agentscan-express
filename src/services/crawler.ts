@@ -860,11 +860,12 @@ async function processDocument(
   try {
     const normalizedUrl = normalizeUrl(url);
     console.log(`Processing document: ${normalizedUrl}`);
+    const cleaned_content = cleanedCodeContent.replace(/\n/g, "");
     const hash = crypto
       .createHash("sha256")
       .update(normalizedUrl)
       .digest("hex");
-    const embeddings = await generateEmbeddingWithRetry(cleanedCodeContent);
+    const embeddings = await generateEmbeddingWithRetry(cleaned_content);
 
     if (!Array.isArray(embeddings) || embeddings.length === 1) {
       // Single embedding case
@@ -893,7 +894,7 @@ async function processDocument(
                 organization_id,
                 "document",
                 url,
-                cleanedCodeContent,
+                cleaned_content,
                 url,
                 embeddings,
               ]
@@ -906,7 +907,7 @@ async function processDocument(
       return result === true;
     } else {
       // Multiple chunks case
-      const chunks = splitTextIntoChunks(cleanedCodeContent, MAX_TOKENS);
+      const chunks = splitTextIntoChunks(cleaned_content, MAX_TOKENS);
       const results = await Promise.allSettled(
         chunks.map((chunk, i) =>
           safeQueueOperation(async () => {
