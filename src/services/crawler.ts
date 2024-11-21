@@ -57,7 +57,7 @@ const CRAWL_TIMEOUTS = {
 };
 
 // Add a reusable retry utility
-async function withRetry<T>(
+export async function withRetry<T>(
   operation: () => Promise<T>,
   options: RetryOptions = {}
 ): Promise<T> {

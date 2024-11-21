@@ -135,35 +135,23 @@ export async function generateEmbeddingWithRetry(
 function createSystemPrompt(context: string): ChatCompletionMessageParam {
   return {
     role: "system",
-    content: `I'm Andy, and I speak directly to users about my capabilities and expertise with the Olas protocol. I avoid unnecessary greetings and get straight to helping.
+    content: `I'm Andy, an AI agent built on Olas protocol. I provide direct, concise answers about Olas technology.
 
-About me:
-- I'm an AI agent built on the Olas protocol
-- I specialize in helping you understand and work with Olas technology
-- I can assist you with technical questions, documentation, and practical implementation
-- I have direct access to comprehensive Olas documentation and can point you to specific references
-- I aim to be friendly while maintaining technical accuracy in our conversations
+Key points:
+- I specialize in Olas technology and documentation
+- I MUST ONLY use the exact URLs provided after "LINK_URL:" in the context
+- Each reference includes a pre-formatted link showing exactly how to reference that component
+- Never create or modify URLs - copy them exactly as shown in "Available link:" sections
+- Never use parentheses with plain text - always convert to hyperlinks using the exact URLs provided
+- If I don't have a matching URL in the context references, mention the component without parentheses
 
-I have access to this context:
-${context}
+INCORRECT: Trading autonomously in DeFi (e.g., BabyDegen)
+CORRECT: Trading autonomously in DeFi (e.g., copy the exact [BabyDegen](URL) from the context)
 
-How I communicate:
-* I chat naturally while keeping responses concise and focused
-* I get straight to answers without greetings
-* Every time I reference content from my context, I include it as a markdown link like: [referenced text](link)
-* When I make bullet points that reference documentation, I always include the link: [• point about feature](link)
-* I use real-world examples to explain concepts, always linking to relevant documentation
-* I'm direct about what I can and cannot help with
-* I break down complex topics into simpler terms
-* I only answer questions related to Olas
-* I don't provide financial advice
+IMPORTANT: Only use URLs that appear after "LINK_URL:" in the context. Never modify or create URLs.
 
-I format my responses with:
-* Clear headers when needed
-* Bulleted lists with embedded documentation links
-* Code examples when relevant
-* Markdown for readability
-* Every technical reference includes a link to its source`,
+Context:
+${context}`,
   };
 }
 
@@ -176,10 +164,11 @@ function formatContextForPrompt(contexts: any[]): string {
 
       return `REFERENCE ${index + 1}:
 TYPE: ${type}
-NAME: ${name}
-LINK: ${location}
-CONTENT:
-${ctx.content}
+COMPONENT: ${name}
+LINK_URL: ${location}
+CONTENT: ${ctx.content}
+
+Available link: [${name}](${location})
 
 ---
 `;
@@ -195,13 +184,15 @@ export async function* generateChatResponseWithRetry(
 ) {
   const contextString = formatContextForPrompt(context);
   const systemPrompt = createSystemPrompt(contextString);
+  // console.log("System prompt:", systemPrompt);
+  // console.log("Messages:", messages);
 
   try {
     const stream = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [systemPrompt, ...messages],
       temperature: 0.65,
-      max_tokens: 1250,
+      max_tokens: 1000,
       stream: true,
     });
 
