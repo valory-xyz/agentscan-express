@@ -1,16 +1,11 @@
 import puppeteer from "puppeteer";
 import { toSql } from "pgvector";
-
 import PQueue from "p-queue";
-
 import * as crypto from "crypto";
 import openai from "../initalizers/openai";
-
 import { MAX_TOKENS, splitTextIntoChunks } from "./openai";
 import { executeQuery, safeQueueOperation } from "./postgres";
-
 import chromium from "@sparticuz/chromium";
-import { executablePath } from "puppeteer";
 
 // Simplify the status enum
 enum ProcessingStatus {
@@ -149,6 +144,7 @@ export async function generateEmbeddingWithRetry(
 async function filter_content(raw_text: string) {
   // Skip processing if text is empty or too short
   if (!raw_text || raw_text.length < 50) {
+    console.log("Raw text too short, skipping filtering");
     return null;
   }
 
@@ -174,29 +170,37 @@ async function filter_content(raw_text: string) {
 
     Content to process:
     
-    ${raw_text
-      .slice(0, 8000)
-      .replace(/\n/g, " ")} // Limit input size to prevent token overflow
+    ${raw_text.slice(0, 8000).replace(/\n/g, " ")}
   `;
 
   try {
+    console.log(`Attempting to filter content of length: ${raw_text.length}`);
+
     const response = await withRetry(
       async () => {
-        return await openai.chat.completions.create({
-          model: "gpt-4o-mini", // Updated to latest model
+        const completion = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
           messages: [{ role: "user", content: prompt }],
           max_tokens: 4000,
-          temperature: 0.3, // Reduced for more consistent output
-          presence_penalty: -0.5, // Encourage focused responses
-          frequency_penalty: 0.3, // Reduce repetition
+          temperature: 0.3,
+          presence_penalty: -0.5,
+          frequency_penalty: 0.3,
         });
+        console.log("OpenAI API response received");
+        return completion;
       },
       { maxRetries: 3, initialDelay: 1000 }
     );
 
-    const filtered_content = response.choices[0]?.message?.content
-      ?.trim()
-      .replace(/\n/g, " ");
+    const filtered_content = response.choices[0]?.message?.content?.trim();
+
+    // Add detailed logging
+    console.log({
+      hasResponse: !!response,
+      hasChoices: !!response.choices?.length,
+      hasMessage: !!response.choices?.[0]?.message,
+      contentLength: filtered_content?.length || 0,
+    });
 
     // Validate output
     if (!filtered_content || filtered_content.length < 50) {
@@ -204,9 +208,15 @@ async function filter_content(raw_text: string) {
       return null;
     }
 
+    console.log(
+      `Successfully filtered content. New length: ${filtered_content.length}`
+    );
     return filtered_content;
   } catch (error: any) {
-    console.error(`Failed to filter content: ${error.message}`);
+    console.error(`Failed to filter content: ${error.message}`, {
+      error,
+      stackTrace: error.stack,
+    });
     return null;
   }
 }
