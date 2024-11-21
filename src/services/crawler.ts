@@ -321,6 +321,7 @@ export async function crawl_website(
     // Only filter and process content if it hasn't been processed before
     if (shouldProcessContent) {
       const filtered_content = await filter_content(bodyText);
+
       if (filtered_content) {
         const success = await processDocument(
           base_url,
@@ -381,8 +382,8 @@ async function processDocument(
   organization_id: string
 ): Promise<boolean> {
   const normalizedUrl = normalizeUrl(url);
+  console.log(`Processing document: ${normalizedUrl}`);
   const hash = crypto.createHash("sha256").update(normalizedUrl).digest("hex");
-  console.log(`Processing document: ${url}`);
   try {
     const embeddings = await generateEmbeddingWithRetry(cleanedCodeContent);
 
@@ -420,6 +421,7 @@ async function processDocument(
           });
         });
       });
+      console.log(`Processed document: ${normalizedUrl}`, result);
       return result !== null;
     } else {
       // Multiple chunks case
@@ -471,6 +473,7 @@ async function processDocument(
           })
         )
       );
+      console.log(`Processed document: ${normalizedUrl}`, results);
       return results.every(
         (result: any) => result.status === "fulfilled" && result.value !== null
       );
