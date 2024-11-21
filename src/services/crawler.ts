@@ -516,68 +516,106 @@ export async function crawl_website(
 
       const processedUrls = new Set();
 
-      console.log(`Processing ${links.length} links from ${base_url}`);
+      console.log(
+        `Processing ${links.length} links from ${base_url} (depth: ${max_depth})`
+      );
 
-      const crawlPromises = links
-        .map((link) => {
-          if (link.startsWith("/")) {
-            link = new URL(link, normalizedBaseUrl).toString();
-          }
-          const normalizedLink = normalizeUrl(link);
+      // Process links in smaller batches to prevent overwhelming the system
+      const BATCH_SIZE = 20;
+      const linkBatches = [];
+      for (let i = 0; i < links.length; i += BATCH_SIZE) {
+        linkBatches.push(links.slice(i, i + BATCH_SIZE));
+      }
 
-          // Skip if already processed
-          if (processedUrls.has(normalizedLink)) {
+      // Add more detailed logging before batch processing
+      console.log(
+        `Splitting ${links.length} links into batches of ${BATCH_SIZE} for ${base_url}`
+      );
+
+      for (const batch of linkBatches) {
+        console.log(`Starting batch processing for ${base_url}:`, {
+          batchSize: batch.length,
+          totalProcessed: processedUrls.size,
+          remainingTotal: links.length - processedUrls.size,
+          currentDepth: max_depth,
+        });
+
+        const crawlPromises = batch
+          .map((link) => {
+            if (link.startsWith("/")) {
+              link = new URL(link, normalizedBaseUrl).toString();
+            }
+            const normalizedLink = normalizeUrl(link);
+
+            // Skip if already processed
+            if (processedUrls.has(normalizedLink)) {
+              return null;
+            }
+            processedUrls.add(normalizedLink);
+
+            if (
+              normalizedLink.startsWith(normalizedBaseUrl) &&
+              max_depth > 0 &&
+              isValidUrl(normalizedLink)
+            ) {
+              return crawlQueue.add(async () => {
+                try {
+                  const crawlPromise = withRetry(
+                    async () => {
+                      return crawl_website(
+                        normalizedLink,
+                        max_depth - 1,
+                        organization_id
+                      );
+                    },
+                    {
+                      maxRetries: 3,
+                      initialDelay: 5000,
+                    }
+                  );
+
+                  return await Promise.race([
+                    crawlPromise,
+                    new Promise(
+                      (_, reject) =>
+                        setTimeout(
+                          () => reject(new Error("Crawl timeout")),
+                          300000
+                        ) // 5 minute timeout
+                    ),
+                  ]);
+                } catch (error) {
+                  console.error(
+                    `Failed to crawl ${normalizedLink}:`,
+                    error instanceof Error ? error.message : error
+                  );
+                  failedLinks.add(normalizedLink);
+                  return [];
+                }
+              });
+            }
             return null;
-          }
-          processedUrls.add(normalizedLink);
+          })
+          .filter(Boolean);
 
-          if (
-            normalizedLink.startsWith(normalizedBaseUrl) &&
-            max_depth > 0 &&
-            isValidUrl(normalizedLink)
-          ) {
-            return crawlQueue.add(async () => {
-              try {
-                const crawlPromise = withRetry(
-                  async () => {
-                    return crawl_website(
-                      normalizedLink,
-                      max_depth - 1,
-                      organization_id
-                    );
-                  },
-                  {
-                    maxRetries: 3,
-                    initialDelay: 5000, // Longer initial delay for full crawl retries
-                  }
-                );
+        // Process each batch with Promise.allSettled
+        const results = await Promise.allSettled(crawlPromises);
 
-                return await Promise.race([crawlPromise]);
-              } catch (error) {
-                console.error(
-                  `Failed to crawl ${normalizedLink}:`,
-                  error instanceof Error ? error.message : error
-                );
-                failedLinks.add(normalizedLink);
-                return [];
-              }
-            });
-          }
-          return null;
-        })
-        .filter(Boolean);
+        // Log batch results
+        const successful = results.filter(
+          (r) => r.status === "fulfilled"
+        ).length;
+        const failed = results.filter((r) => r.status === "rejected").length;
+        console.log(`Completed processing batch for ${base_url}:`, {
+          successful,
+          failed,
+          batchSize: batch.length,
+          remainingLinks: links.length - processedUrls.size,
+        });
 
-      // Use Promise.allSettled to handle failures gracefully
-      const results = await Promise.allSettled(crawlPromises);
-
-      // Log crawling results
-      const successful = results.filter((r) => r.status === "fulfilled").length;
-      const failed = results.filter((r) => r.status === "rejected").length;
-      console.log(`Completed processing links for ${base_url}:`, {
-        successful,
-        failed,
-        total: links.length,
-      });
+        // Add a small delay between batches to prevent overwhelming the system
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
     } catch (error: any) {
       console.error(`Failed to process ${base_url}:`, {
         error: error.message,
