@@ -23,11 +23,89 @@ export const dbQueue = new PQueue({
   console.error(`Database operation failed: ${error.message}`);
 });
 
+// Add type for retry options
+interface RetryOptions {
+  maxRetries?: number;
+  initialDelay?: number;
+}
+
 // Add a crawling queue to limit concurrent page scraping
 const crawlQueue = new PQueue({
   concurrency: 4, // Reduced for Railway
   interval: 2000, // Increased interval
 });
+
+// Add these timeout constants at the top
+const TIMEOUTS = {
+  PAGE_LOAD: 30000, // 30 seconds for initial page load
+  SCRAPE_OPERATION: 45000, // 45 seconds for scraping content
+  FILTER_CONTENT: 60000, // 60 seconds for content filtering
+  EMBEDDING_GENERATION: 30000, // 30 seconds for embedding generation
+  CRAWL_OPERATION: 600000, // 10 minutes for complete crawl of a single URL
+};
+
+// Add a reusable retry utility
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  options: RetryOptions = {}
+): Promise<T> {
+  const { maxRetries = 3, initialDelay = 400 } = options;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (attempt === maxRetries) {
+        console.error(`Failed all retry attempts:`, error);
+        throw error;
+      }
+      const delay =
+        initialDelay * Math.pow(2, attempt - 1) + Math.random() * 200;
+      console.log(`Attempt ${attempt} failed. Retrying in ${delay}ms...`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  throw new Error("Failed after all retries");
+}
+
+// Cache for embeddings
+const embeddingCache = new Map<string, number[]>();
+
+export async function generateEmbeddingWithRetry(
+  text: string,
+  options?: RetryOptions
+): Promise<number[]> {
+  try {
+    // Check cache first
+    const cached = embeddingCache.get(text);
+    if (cached) return cached;
+
+    const embeddingPromise = withRetry(async () => {
+      const response = await openai.embeddings.create({
+        model: "text-embedding-3-small",
+        input: text,
+        dimensions: 512,
+      });
+      return toSql(response.data?.[0]?.embedding);
+    }, options);
+
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error("Embedding generation timeout")),
+        TIMEOUTS.EMBEDDING_GENERATION
+      )
+    );
+
+    const embedding = await Promise.race([embeddingPromise, timeoutPromise]);
+
+    // Cache the result
+    embeddingCache.set(text, embedding);
+    return embedding;
+  } catch (error) {
+    console.error("Fatal error in generateEmbeddingWithRetry:", error);
+    return []; // Return empty embedding instead of crashing
+  }
+}
 
 // Add this utility function near the top of the file
 function normalizeUrl(url: string): string {
@@ -45,13 +123,19 @@ function normalizeUrl(url: string): string {
   }
 }
 
+// Add interface near the top of file
+interface ScrapedContent {
+  bodyText: string;
+  links: string[];
+}
+
+// Update scrape_website function
 async function scrape_website(url: string) {
   try {
     return withRetry(
       async () => {
         let browser;
         try {
-          const isDevelopment = process.env.NODE_ENV === "development";
           console.log(`Starting scrape for ${url}`);
 
           const launchOptions = {
@@ -71,18 +155,11 @@ async function scrape_website(url: string) {
             console.log(`Navigating to ${url}`);
             await page.goto(url, {
               waitUntil: "networkidle",
-              timeout: 60000,
-            });
-            console.log(`Successfully loaded ${url}`);
-
-            const used = process.memoryUsage();
-            console.log("Memory usage before scraping:", {
-              rss: `${Math.round(used.rss / 1024 / 1024)}MB`,
-              heapTotal: `${Math.round(used.heapTotal / 1024 / 1024)}MB`,
-              heapUsed: `${Math.round(used.heapUsed / 1024 / 1024)}MB`,
+              timeout: TIMEOUTS.PAGE_LOAD,
             });
 
-            const content = await page.evaluate(() => {
+            // Add timeout for content scraping
+            const contentPromise = page.evaluate(() => {
               const links = Array.from(document.querySelectorAll("a"))
                 .map((link) => link.href)
                 .filter((href) => href && !href.startsWith("javascript:")); // Filter out javascript: links
@@ -95,6 +172,18 @@ async function scrape_website(url: string) {
                 links: uniqueLinks,
               };
             });
+
+            const timeoutPromise = new Promise((_, reject) =>
+              setTimeout(
+                () => reject(new Error("Content scraping timeout")),
+                TIMEOUTS.SCRAPE_OPERATION
+              )
+            );
+
+            const content = (await Promise.race([
+              contentPromise,
+              timeoutPromise,
+            ])) as ScrapedContent;
 
             // Normalize all links
             content.links = content.links.map(normalizeUrl).filter(
@@ -139,66 +228,7 @@ async function scrape_website(url: string) {
   }
 }
 
-// Add type for retry options
-interface RetryOptions {
-  maxRetries?: number;
-  initialDelay?: number;
-}
-
-// Add a reusable retry utility
-async function withRetry<T>(
-  operation: () => Promise<T>,
-  options: RetryOptions = {}
-): Promise<T> {
-  const { maxRetries = 3, initialDelay = 400 } = options;
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      return await operation();
-    } catch (error) {
-      if (attempt === maxRetries) {
-        console.error(`Failed all retry attempts:`, error);
-        throw error;
-      }
-      const delay =
-        initialDelay * Math.pow(2, attempt - 1) + Math.random() * 200;
-      console.log(`Attempt ${attempt} failed. Retrying in ${delay}ms...`);
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    }
-  }
-  throw new Error("Failed after all retries");
-}
-
-// Cache for embeddings
-const embeddingCache = new Map<string, number[]>();
-
-export async function generateEmbeddingWithRetry(
-  text: string,
-  options?: RetryOptions
-): Promise<number[]> {
-  try {
-    // Check cache first
-    const cached = embeddingCache.get(text);
-    if (cached) return cached;
-
-    const embedding = await withRetry(async () => {
-      const response = await openai.embeddings.create({
-        model: "text-embedding-3-small",
-        input: text,
-        dimensions: 512,
-      });
-      return toSql(response.data?.[0]?.embedding);
-    }, options);
-
-    // Cache the result
-    embeddingCache.set(text, embedding);
-    return embedding;
-  } catch (error) {
-    console.error("Fatal error in generateEmbeddingWithRetry:", error);
-    return []; // Return empty embedding instead of crashing
-  }
-}
-
+// Update filter_content function
 async function filter_content(raw_text: string) {
   try {
     // Skip processing if text is empty or too short
@@ -234,7 +264,7 @@ async function filter_content(raw_text: string) {
 
     console.log(`Attempting to filter content of length: ${raw_text.length}`);
 
-    const response = await withRetry(
+    const filterPromise = withRetry(
       async () => {
         const completion = await openai.chat.completions.create({
           model: "gpt-4o-mini",
@@ -249,6 +279,23 @@ async function filter_content(raw_text: string) {
       },
       { maxRetries: 3, initialDelay: 1000 }
     );
+
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error("Content filtering timeout")),
+        TIMEOUTS.FILTER_CONTENT
+      )
+    );
+
+    const response = (await Promise.race([
+      filterPromise,
+      timeoutPromise,
+    ])) as any;
+
+    if (!response || !response?.choices || !response.choices[0]?.message) {
+      console.error("No response from OpenAI API");
+      return null;
+    }
 
     const filtered_content = response.choices[0]?.message?.content?.trim();
 
@@ -373,6 +420,7 @@ export async function crawl_website(
   organization_id: string
 ) {
   try {
+    const failedLinks = new Set<string>();
     const normalizedBaseUrl = normalizeUrl(base_url);
 
     // Skip invalid URLs early
@@ -467,8 +515,9 @@ export async function crawl_website(
         }
       }
 
-      // Add timeout for crawling sub-pages
-      const timeoutDuration = 10000; // 10 seconds
+      // Increase timeout duration and add progress tracking
+      const timeoutDuration = 60000; // Increase to 60 seconds
+      const processedUrls = new Set();
 
       console.log(`Processing ${links.length} links from ${base_url}`);
 
@@ -478,33 +527,68 @@ export async function crawl_website(
             link = new URL(link, normalizedBaseUrl).toString();
           }
           const normalizedLink = normalizeUrl(link);
+
+          // Skip if already processed
+          if (processedUrls.has(normalizedLink)) {
+            return null;
+          }
+          processedUrls.add(normalizedLink);
+
           if (
             normalizedLink.startsWith(normalizedBaseUrl) &&
             max_depth > 0 &&
             isValidUrl(normalizedLink)
           ) {
-            return Promise.race([
-              crawlQueue.add(() =>
-                crawl_website(normalizedLink, max_depth - 1, organization_id)
-              ),
-              new Promise((_, reject) =>
-                setTimeout(
-                  () => reject(new Error(`Timeout crawling ${normalizedLink}`)),
-                  timeoutDuration
-                )
-              ),
-            ]).catch((error) => {
-              console.error(
-                `Failed to crawl ${normalizedLink}: ${error.message}`
-              );
-              return [];
+            return crawlQueue.add(async () => {
+              try {
+                const crawlPromise = withRetry(
+                  async () => {
+                    return crawl_website(
+                      normalizedLink,
+                      max_depth - 1,
+                      organization_id
+                    );
+                  },
+                  {
+                    maxRetries: 3,
+                    initialDelay: 5000, // Longer initial delay for full crawl retries
+                  }
+                );
+
+                const timeoutPromise = new Promise((_, reject) =>
+                  setTimeout(
+                    () =>
+                      reject(new Error(`Crawl timeout for ${normalizedLink}`)),
+                    TIMEOUTS.CRAWL_OPERATION
+                  )
+                );
+
+                return await Promise.race([crawlPromise, timeoutPromise]);
+              } catch (error) {
+                console.error(
+                  `Failed to crawl ${normalizedLink}:`,
+                  error instanceof Error ? error.message : error
+                );
+                failedLinks.add(normalizedLink);
+                return [];
+              }
             });
           }
+          return null;
         })
         .filter(Boolean);
 
-      await Promise.all(crawlPromises);
-      console.log(`Completed processing all links for ${base_url}`);
+      // Use Promise.allSettled to handle failures gracefully
+      const results = await Promise.allSettled(crawlPromises);
+
+      // Log crawling results
+      const successful = results.filter((r) => r.status === "fulfilled").length;
+      const failed = results.filter((r) => r.status === "rejected").length;
+      console.log(`Completed processing links for ${base_url}:`, {
+        successful,
+        failed,
+        total: links.length,
+      });
     } catch (error: any) {
       console.error(`Failed to process ${base_url}:`, {
         error: error.message,
