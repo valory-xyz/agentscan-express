@@ -23,7 +23,11 @@ router.post("/", async (req, res) => {
   // Query code embeddings using HNSW vector similarity search
   const codeEmbeddingsQuery = await pool.query(
     `SELECT 
-      *,
+      content,
+      name,
+      location,
+      type,
+  
       embedding <=> $1 as similarity
     FROM context_embeddings 
     WHERE company_id = $2
@@ -38,9 +42,6 @@ router.post("/", async (req, res) => {
     content: embedding.content,
     name: embedding.name,
     location: embedding.location ? new URL(embedding.location).toString() : "",
-    original_content: embedding.original_content
-      ? new URL(embedding.original_content).toString()
-      : "",
     type: embedding.type || "code",
   }));
 
