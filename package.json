@@ -29,6 +29,7 @@
     "open-graph-scraper": "^6.8.2",
     "openai": "^4.68.4",
     "p-queue": "^8.0.1",
+    "pg": "^8.13.1",
     "pgvector": "^0.2.0",
     "puppeteer": "^23.8.0",
     "redis": "^4.7.0",
