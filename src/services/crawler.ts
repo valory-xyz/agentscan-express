@@ -738,13 +738,13 @@ export async function crawl_website(
                   link = new URL(link, normalizedBaseUrl).toString();
                 }
                 const normalizedLink = normalizeUrl(link);
-                const linkObj = new URL(normalizedLink);
 
                 // Process if:
-                // 1. Link is from the same domain (olas.network)
+                // 1. Link is from the same domain as base_url
                 // 2. Not already processed
                 // 3. Within depth limit
                 if (
+                  normalizedLink.includes(baseUrlObj.hostname) &&
                   !processedUrls.has(normalizedLink) &&
                   max_depth > 0 &&
                   isValidUrl(normalizedLink)

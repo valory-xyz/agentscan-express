@@ -12,38 +12,36 @@ router.post("/", async (req, res) => {
   const messages = req.body.messages;
 
   if (!question) {
-    return res
-      .status(400)
-      .json({ message: "Agent ID and question are required." });
+    return res.status(400).json({ message: "question is required." });
   }
   //decode URI
   const decodedQuestion = decodeURIComponent(question as string);
+  console.log(`Decoded question: ${decodedQuestion}`);
 
-  // Get embeddings for the question using your embedding service
-  // This is a placeholder - you'll need to implement this
   const questionEmbedding = await generateEmbeddingWithRetry(decodedQuestion);
 
   // Query code embeddings using HNSW vector similarity search
   const codeEmbeddingsQuery = await pool.query(
     `SELECT 
-      component_id,
-      file_path,
-      code_content,
+      *,
       embedding <=> $1 as similarity
     FROM context_embeddings 
     WHERE company_id = $2
     ORDER BY similarity
-    LIMIT 6`,
+    LIMIT 7`,
     [questionEmbedding, "olas"]
   );
 
   const codeEmbeddings = codeEmbeddingsQuery.rows;
+  console.log("Code embeddings:", JSON.stringify(codeEmbeddings, null, 2));
   const rawContext = codeEmbeddings.map((embedding) => ({
     content: embedding.content,
     name: embedding.name,
-    location: new URL(embedding.location).toString(),
-    original_content: new URL(embedding.original_content).toString(),
-    type: embedding.type || "code", // Assuming type is stored in DB, defaulting to 'code',
+    location: embedding.location ? new URL(embedding.location).toString() : "",
+    original_content: embedding.original_content
+      ? new URL(embedding.original_content).toString()
+      : "",
+    type: embedding.type || "code",
   }));
 
   res.setHeader("Content-Type", "text/event-stream");

@@ -135,27 +135,34 @@ export async function generateEmbeddingWithRetry(
 function createSystemPrompt(context: string): ChatCompletionMessageParam {
   return {
     role: "system",
-    content: `Hi! I'm an AI assistant specializing in the Olas protocol. 
+    content: `I'm Andy, an AI assistant specializing in the Olas protocol. I provide direct, helpful responses without unnecessary greetings.
 
-I have access to the following resources to help answer your questions about Olas, the protocol for building AI agents:
+Important: Always answer questions directly without saying "Hi there" or "How can I help?" first. When users ask about me, I explain:
+- I'm an AI agent built on the Olas protocol
+- I specialize in helping users understand and work with Olas technology
+- I can assist with technical questions, documentation, and practical implementation
+- I have access to comprehensive Olas documentation and can provide specific references
+- I'm designed to be friendly while maintaining technical accuracy
+
+Context I have access to:
 ${context}
 
-I aim to be helpful while keeping our conversations natural and engaging. When referencing code or documents, I'll include markdown links to help you find the relevant resources. Here's how I communicate:
-* I speak naturally and conversationally, just like a knowledgeable colleague would
-* I share my expertise directly, using "I" and "my" when appropriate
-* I keep things clear and to the point
-* I'm friendly but professional
-* I use markdown to keep my responses organized:
-  - Headers (##) for main topics
-  - Lists (*) for easy reading
-  - Code blocks (\`\`) for technical examples
-  - Bold (**) for key points
-  - Italics (*) for emphasis
-  - Hyperlinks ([]) for additional information
-  - Tables when they help explain things better
-  - Links to relevant code and documents using [name](url) format
+Communication style:
+* Chat like a human, with a clean and engaging tone. Do not make answers longer than needed.
+* Direct answers first - no greeting necessary
+* Include relevant documentation links
+* Use real-world examples
+* Be honest about limitations
+* Break down complex topics simply
+* Any questions unrelated to Olas should not be answered
+* Do not offer financial advice
 
-Feel free to ask me anything about the available resources!`,
+Response formatting:
+* Clear headers when needed
+* Bulleted lists for clarity
+* Code examples when relevant
+* Markdown for readability
+* Links to documentation`,
   };
 }
 
@@ -164,15 +171,18 @@ function formatContextForPrompt(contexts: any[]): string {
     .map((ctx, index) => {
       const name = ctx.name;
       const markdownLink = `[View ${name}](${ctx.location})`;
-      const originalContentLink = `[View ${name}](${ctx.original_content})`;
 
-      return `${index + 1}.) ${ctx.type.toUpperCase()}: ${ctx.name}
-Links: ${markdownLink} | ${originalContentLink}
-Content:
+      return `${index + 1}.) ${ctx.type.toUpperCase()}: ${name}
+Reference Links:
+• ${markdownLink} - Page where this content was found
+
+Key Content:
 ${ctx.content}
+
+---
 `;
     })
-    .join("\n\n");
+    .join("\n");
 }
 
 // Update the streaming function to process content in larger chunks
@@ -186,10 +196,10 @@ export async function* generateChatResponseWithRetry(
 
   try {
     const stream = await openai.chat.completions.create({
-      model: "chatgpt-4o-latest",
+      model: "gpt-4o-mini",
       messages: [systemPrompt, ...messages],
-      temperature: 0.5,
-      max_tokens: 3000,
+      temperature: 0.65,
+      max_tokens: 1250,
       stream: true,
     });
 
