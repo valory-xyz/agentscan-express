@@ -355,13 +355,14 @@ export async function crawl_website(
         }
         if (link.startsWith(base_url) && max_depth > 0) {
           link = link.replace(/\/$/, "");
+          console.log(`Crawling next -> ${link}`);
           return crawlQueue.add(() =>
             crawl_website(link, max_depth - 1, organization_id)
           );
         }
       })
       .filter(Boolean); // Filter out undefined promises
-    console.log(`Crawling next -> ${base_url}`, crawlPromises);
+
     await Promise.all(crawlPromises);
   } catch (error: any) {
     console.error(`Failed to scrape ${base_url}: ${error.message}`);
