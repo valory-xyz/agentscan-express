@@ -294,7 +294,7 @@ async function filter_pdf_content(raw_text: string) {
 
       Content to process:
       
-      ${raw_text.slice(0, 8000).replace(/\n/g, " ")}
+      ${raw_text.slice(0, 84500).replace(/\n/g, " ")}
     `;
 
     console.log(
@@ -459,35 +459,54 @@ async function scrape_website(url: string): Promise<ScrapedContent> {
 // Update filter_content function
 async function filter_content(raw_text: string) {
   try {
-    // Skip processing if text is empty or too short
     if (!raw_text || raw_text.length < 50) {
       console.log("Raw text too short, skipping filtering");
       return null;
     }
 
     const prompt = `
-      You are a content extraction specialist. Your task is to:
-      1. Extract only the main, meaningful content from the provided text
-      2. Remove all of the following:
-         - Navigation menus and headers
-         - Advertisements
-         - Cookie notices
-         - Legal disclaimers and footers
-         - Social media buttons/widgets
-         - Search bars and forms
-         - Repetitive elements
-      3. Preserve:
-         - Main article content
-         - Important headings
-         - Relevant code examples or technical documentation
-         - Key product information
-      4. Format the output as clean, readable text
+      You are a content extraction specialist. Your task is to extract only the meaningful content from web pages while aggressively removing all navigation and UI elements.
 
-      Return only the processed content, without any explanations.
+      STRICTLY REMOVE all of these elements:
+      1. Navigation and UI Elements:
+         - Navigation menus and links (e.g., "Home", "About", "Resources", "Learn")
+         - Header menus and site sections
+         - Sidebar navigation
+         - Breadcrumb trails
+         - "Get Started" or "Learn More" type links
+         - Footer menus and links
+      
+      2. Marketing and UI Components:
+         - Call-to-action buttons
+         - Newsletter signup forms
+         - Social media buttons/widgets
+         - Cookie notices and privacy banners
+         - Advertisement sections
+         - Download/Install buttons
+         - Search bars and forms
+      
+      3. Metadata and Technical Elements:
+         - Copyright notices
+         - Terms of service
+         - Legal disclaimers
+         - Site metadata
+         - Timestamps and dates (unless part of article content)
+         - Author bylines (unless relevant to content)
+
+      PRESERVE ONLY:
+      1. Main content:
+         - Article body text
+         - Important headings within the main content
+         - Relevant technical documentation
+         - Actual product information
+         - Important data and statistics
+         - Code examples (if present)
+
+      Return ONLY the cleaned, relevant content without any navigation elements, marketing components, or UI elements. Format as clean, readable text.
 
       Content to process:
       
-      ${raw_text.slice(0, 8000).replace(/\n/g, " ")}
+      ${raw_text.slice(0, 84500).replace(/\n/g, " ")}
     `;
 
     console.log(`Attempting to filter content of length: ${raw_text.length}`);
@@ -699,7 +718,10 @@ export async function crawl_website(
         );
 
         if (filtered_content) {
-          console.log(`Starting document processing for ${base_url}`);
+          console.log(
+            `Starting document processing for ${base_url}`,
+            filtered_content
+          );
           const success = await processDocument(
             base_url,
             filtered_content,
@@ -734,7 +756,6 @@ export async function crawl_website(
       console.log(
         `Processing ${links.length} links from ${base_url} (depth: ${max_depth})`
       );
-      console.log(`Unique links: ${links}`);
 
       // Create batches of links
       const BATCH_SIZE = 8;
