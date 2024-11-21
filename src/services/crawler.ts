@@ -1,10 +1,15 @@
-import { chromium } from "playwright";
+import { chromium, Browser } from "playwright";
 import { toSql } from "pgvector";
 import PQueue from "p-queue";
 import * as crypto from "crypto";
 import openai from "../initalizers/openai";
 import { MAX_TOKENS, splitTextIntoChunks } from "./openai";
 import { executeQuery, safeQueueOperation } from "./postgres";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+import fetch from "node-fetch";
+import pdf from "pdf-parse";
 
 // Simplify the status enum
 enum ProcessingStatus {
@@ -41,6 +46,8 @@ const TIMEOUTS = {
   SCRAPE_OPERATION: 45000, // 45 seconds for scraping content
   FILTER_CONTENT: 60000, // 60 seconds for content filtering
   EMBEDDING_GENERATION: 30000, // 30 seconds for embedding generation
+  PDF_DOWNLOAD: 30000, // 30 seconds for PDF download
+  PDF_PROCESSING: 60000, // 60 seconds for PDF processing
 };
 
 // Add these new timeout constants
@@ -115,6 +122,8 @@ export async function generateEmbeddingWithRetry(
 // Add this utility function near the top of the file
 function normalizeUrl(url: string): string {
   try {
+    // Handle URLs that start with @ by removing it
+
     const parsedUrl = new URL(url);
     // Remove trailing slashes, convert to lowercase, remove 'www.', and remove hash fragments
     return parsedUrl
@@ -124,7 +133,7 @@ function normalizeUrl(url: string): string {
       .replace(/^https?:\/\/www\./i, "https://") // Normalize www and protocol
       .replace(/#.*$/, ""); // Remove hash fragments
   } catch (error) {
-    return url;
+    return url; // Return original URL if parsing fails
   }
 }
 
@@ -134,15 +143,216 @@ interface ScrapedContent {
   links: string[];
 }
 
-// Update scrape_website function
-async function scrape_website(url: string) {
+// Add interface near top of file
+interface PDFData {
+  text: string;
+  // Add other properties if needed
+}
+
+// Add this helper function
+async function downloadAndProcessPdf(url: string): Promise<string> {
+  const tempDir = os.tmpdir();
+  const tempFile = path.join(tempDir, `temp-${Date.now()}.pdf`);
+
   try {
+    console.log(`Downloading PDF from: ${url}`);
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    const downloadPromise = fs.promises
+      .writeFile(tempFile, buffer)
+      .then(() => tempFile);
+
+    const downloadedFile = await Promise.race([
+      downloadPromise,
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error("PDF download timeout")),
+          TIMEOUTS.PDF_DOWNLOAD
+        )
+      ),
+    ]);
+
+    console.log(`Processing PDF file: ${downloadedFile}`);
+    const processPromise = pdf(
+      await fs.promises.readFile(downloadedFile as string),
+      {
+        max: 0,
+        pagerender: function (pageData) {
+          return pageData.getTextContent().then(function (textContent: any) {
+            return textContent.items
+              .map((item: { str: string }) => item.str)
+              .join(" ");
+          });
+        },
+      }
+    );
+
+    const pdfData = (await Promise.race([
+      processPromise,
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error("PDF processing timeout")),
+          TIMEOUTS.PDF_PROCESSING
+        )
+      ),
+    ])) as PDFData;
+
+    // Clean up text content
+    const cleanedText = pdfData.text
+      .replace(/\s+/g, " ") // Replace multiple spaces with single space
+      .replace(/[^\x20-\x7E\n]/g, "") // Remove non-printable characters
+      .trim();
+
+    console.log(
+      `Successfully extracted ${cleanedText.length} characters from PDF`
+    );
+    return cleanedText;
+  } finally {
+    // Cleanup temp file
+    fs.unlink(tempFile, (err) => {
+      if (err) console.error("Error cleaning up PDF temp file:", err);
+    });
+  }
+}
+
+// Add this to your isValidUrl function
+function isValidUrl(url: string): boolean {
+  try {
+    // Check if URL is a PDF
+    if (
+      url.toLowerCase().endsWith(".pdf") ||
+      url.toLowerCase().includes("/pdf/")
+    ) {
+      return true;
+    }
+
+    // Skip search-related URLs
+    if (
+      url.toLowerCase().includes("search") ||
+      url.toLowerCase().includes("?q=")
+    ) {
+      return false;
+    }
+
+    // Skip common search parameter patterns
+    const searchPatterns = ["/search", "query=", "q=", "search="];
+    if (searchPatterns.some((pattern) => url.includes(pattern))) {
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+// Add this function to handle PDF content filtering
+async function filter_pdf_content(raw_text: string) {
+  try {
+    if (!raw_text || raw_text.length < 50) {
+      console.log("PDF text too short, skipping filtering");
+      return null;
+    }
+
+    const prompt = `
+      You are a PDF content extraction specialist. Your task is to:
+      1. Create a clear, well-structured summary of the PDF content
+      2. Include:
+         - Main topics and key points
+         - Important findings or conclusions
+         - Relevant technical details or specifications
+         - Key data points or statistics
+      3. Remove:
+         - Headers and footers
+         - Page numbers
+         - Redundant information
+         - References (unless crucial)
+      4. Format the output as clean, readable text
+      5. Maintain technical accuracy while improving readability
+
+      Return only the processed content, without any explanations.
+
+      Content to process:
+      
+      ${raw_text.slice(0, 8000).replace(/\n/g, " ")}
+    `;
+
+    console.log(
+      `Attempting to filter PDF content of length: ${raw_text.length}`
+    );
+
+    const filterPromise = withRetry(
+      async () => {
+        const completion = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: 4000,
+          temperature: 0.3,
+          presence_penalty: -0.5,
+          frequency_penalty: 0.3,
+        });
+        return completion;
+      },
+      { maxRetries: 3, initialDelay: 1000 }
+    ) as any;
+
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error("PDF content filtering timeout")),
+        TIMEOUTS.FILTER_CONTENT
+      )
+    );
+
+    const response = await Promise.race([filterPromise, timeoutPromise]);
+
+    if (!response?.choices?.[0]?.message?.content) {
+      console.error("No response from OpenAI API for PDF processing");
+      return null;
+    }
+
+    const filtered_content = response.choices[0].message.content.trim();
+    console.log(`Filtered content: ${filtered_content}`);
+
+    if (!filtered_content || filtered_content.length < 50) {
+      console.warn("Filtered PDF content seems too short or empty");
+      return null;
+    }
+
+    console.log(
+      `Successfully filtered PDF content. New length: ${filtered_content.length}`
+    );
+    return filtered_content;
+  } catch (error) {
+    console.error("Fatal error in filter_pdf_content:", error);
+    return null;
+  }
+}
+
+// Modify the scrape_website function to handle PDFs
+async function scrape_website(url: string): Promise<ScrapedContent> {
+  let browser: any = null;
+  try {
+    // Handle PDF case (no changes needed here)
+    if (
+      url.toLowerCase().endsWith(".pdf") ||
+      url.toLowerCase().includes("/pdf/")
+    ) {
+      console.log(`Detected PDF URL: ${url}`);
+      const pdfText = await downloadAndProcessPdf(url);
+      const filteredContent = await filter_pdf_content(pdfText);
+      return {
+        bodyText: filteredContent || pdfText,
+        links: [],
+      };
+    }
+
     return withRetry(
       async () => {
-        let browser;
         try {
           console.log(`Starting scrape for ${url}`);
-
           const launchOptions = {
             headless: true,
             args: ["--no-sandbox", "--disable-setuid-sandbox"],
@@ -156,70 +366,60 @@ async function scrape_website(url: string) {
           const page = await context.newPage();
           console.log(`New page created for ${url}`);
 
-          try {
-            console.log(`Navigating to ${url}`);
-            await page.goto(url, {
-              waitUntil: "networkidle",
-              timeout: TIMEOUTS.PAGE_LOAD,
-            });
-
-            // Add timeout for content scraping
-            const contentPromise = page.evaluate(() => {
-              const links = Array.from(document.querySelectorAll("a"))
-                .map((link) => link.href)
-                .filter((href) => href && !href.startsWith("javascript:")); // Filter out javascript: links
-
-              // Remove duplicates using Set
-              const uniqueLinks = [...new Set(links)];
-
-              return {
-                bodyText: document.body.innerText,
-                links: uniqueLinks,
-              };
-            });
-
-            const timeoutPromise = new Promise((_, reject) =>
-              setTimeout(
-                () => reject(new Error("Content scraping timeout")),
-                TIMEOUTS.SCRAPE_OPERATION
-              )
-            );
-
-            const content = (await Promise.race([
-              contentPromise,
-              timeoutPromise,
-            ])) as ScrapedContent;
-
-            // Normalize all links
-            content.links = content.links.map(normalizeUrl).filter(
-              (link, index, self) =>
-                // Remove duplicates after normalization
-                self.indexOf(link) === index &&
-                // Ensure link is valid
-                isValidUrl(link)
-            );
-
-            return content;
-          } finally {
-            await context.close();
-            await browser.close();
-          }
-        } catch (error: any) {
-          console.error("Browser operation error:", {
-            message: error.message,
-            stack: error.stack,
-            code: error.code,
-            signal: error.signal,
-            url: url,
+          console.log(`Navigating to ${url}`);
+          await page.goto(url, {
+            waitUntil: "networkidle",
+            timeout: TIMEOUTS.PAGE_LOAD,
           });
+
+          // Add timeout for content scraping
+          const contentPromise = page.evaluate(() => {
+            const links = Array.from(document.querySelectorAll("a"))
+              .map((link) => link.href)
+              .filter((href) => href && !href.startsWith("javascript:"));
+
+            const uniqueLinks = [...new Set(links)];
+            console.log(`Found ${uniqueLinks.length} links`);
+
+            return {
+              bodyText: document.body.innerText,
+              links: uniqueLinks,
+            };
+          });
+
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error("Content scraping timeout")),
+              TIMEOUTS.SCRAPE_OPERATION
+            )
+          );
+
+          const content = (await Promise.race([
+            contentPromise,
+            timeoutPromise,
+          ])) as ScrapedContent;
+
+          content.links = content.links
+            .map(normalizeUrl)
+            .filter(
+              (link, index, self) =>
+                self.indexOf(link) === index &&
+                isValidUrl(link) &&
+                !processedUrlsCache.has(link)
+            );
+
+          return content;
+        } finally {
+          // Ensure cleanup happens in all cases
           if (browser) {
-            await browser
-              .close()
-              .catch((closeError) =>
-                console.error("Error closing browser:", closeError)
+            await browser.close().catch((err: Error) => {
+              console.error(
+                "Error while closing browser in error handler:",
+                err
               );
+            });
+            browser = null;
           }
-          throw error;
         }
       },
       {
@@ -229,7 +429,13 @@ async function scrape_website(url: string) {
     );
   } catch (error) {
     console.error("Fatal error in scrape_website:", error);
-    return { bodyText: "", links: [] }; // Return empty result instead of crashing
+    // Ensure browser is closed even if the retry mechanism fails
+    if (browser) {
+      await browser.close().catch((err: Error) => {
+        console.error("Error while closing browser in error handler:", err);
+      });
+    }
+    return { bodyText: "", links: [] };
   }
 }
 
@@ -392,41 +598,17 @@ async function updateProcessingStatus(
   }
 }
 
-// Add this function near the top with other utility functions
-function isValidUrl(url: string): boolean {
-  try {
-    const parsedUrl = new URL(url);
-
-    // Skip search-related URLs
-    if (
-      parsedUrl.search || // Has query parameters
-      parsedUrl.pathname.includes("search") ||
-      parsedUrl.pathname.includes("?q=")
-    ) {
-      return false;
-    }
-
-    // Skip common search parameter patterns
-    const searchPatterns = ["/search", "query=", "q=", "search="];
-    if (searchPatterns.some((pattern) => url.includes(pattern))) {
-      return false;
-    }
-
-    return true;
-  } catch (error) {
-    return false;
-  }
-}
+// Add this near the top with other constants
+const processedUrlsCache = new Set<string>();
 
 // Update the crawl_website function to use the validation
 export async function crawl_website(
   base_url: string,
-  max_depth: number = 20,
+  max_depth: number = 7,
   organization_id: string,
   currentDepth: number = 0
 ) {
   try {
-    const failedLinks = new Set<string>();
     const normalizedBaseUrl = normalizeUrl(base_url);
 
     // Skip invalid URLs early
@@ -435,12 +617,20 @@ export async function crawl_website(
       return [];
     }
 
+    // Check if URL was already processed in this session
+    if (processedUrlsCache.has(normalizedBaseUrl)) {
+      console.log(
+        `Skipping already processed URL in this session: ${normalizedBaseUrl}`
+      );
+      return [];
+    }
+
     const urlId = crypto
       .createHash("sha256")
       .update(normalizedBaseUrl)
       .digest("hex");
 
-    // Check status but don't return early
+    // Check database status
     const status = await dbQueue.add(async () => {
       const result = await executeQuery(async (client) => {
         const res = await client.query(
@@ -453,25 +643,24 @@ export async function crawl_website(
       return result;
     });
 
-    const shouldProcessContent = status !== ProcessingStatus.COMPLETED;
-    if (!shouldProcessContent) {
-      console.log(
-        `${base_url} was previously processed - skipping content processing`
-      );
+    if (status === ProcessingStatus.COMPLETED) {
+      console.log(`${base_url} was previously processed - skipping`);
+      processedUrlsCache.add(normalizedBaseUrl); // Add to cache
     }
+
+    // Add to processed cache before processing
+    processedUrlsCache.add(normalizedBaseUrl);
 
     console.log(`Crawling: ${base_url}`);
 
     try {
-      if (shouldProcessContent) {
-        console.log(`Updating processing status for ${base_url}`);
-        await updateProcessingStatus(
-          urlId,
-          base_url,
-          ProcessingStatus.PROCESSING,
-          organization_id
-        );
-      }
+      console.log(`Updating processing status for ${base_url}`);
+      await updateProcessingStatus(
+        urlId,
+        base_url,
+        ProcessingStatus.PROCESSING,
+        organization_id
+      );
 
       console.log(`Starting scrape for ${base_url}`);
       const { bodyText, links } = await scrape_website(base_url);
@@ -480,7 +669,7 @@ export async function crawl_website(
       );
 
       // Only filter and process content if it hasn't been processed before
-      if (shouldProcessContent) {
+      if (status !== ProcessingStatus.COMPLETED) {
         console.log(`Starting content filtering for ${base_url}`);
         const filtered_content = await filter_content(bodyText);
         console.log(
@@ -525,6 +714,7 @@ export async function crawl_website(
       console.log(
         `Processing ${links.length} links from ${base_url} (depth: ${max_depth})`
       );
+      console.log(`Unique links: ${links}`);
 
       // Create batches of links
       const BATCH_SIZE = 8;
@@ -558,10 +748,11 @@ export async function crawl_website(
                 processedUrls.add(normalizedLink);
 
                 if (
-                  normalizedLink.startsWith(normalizedBaseUrl) &&
+                  normalizedLink.includes(normalizedBaseUrl) &&
                   max_depth > 0 &&
                   isValidUrl(normalizedLink)
                 ) {
+                  console.log(`Crawling new link:!!!! ${normalizedLink}`);
                   return crawlQueue.add(async () => {
                     const singleCrawlPromise = withRetry(
                       async () => {
@@ -573,7 +764,7 @@ export async function crawl_website(
                         );
                       },
                       {
-                        maxRetries: 2, // Reduced retries
+                        maxRetries: 2,
                         initialDelay: 2000,
                       }
                     );
