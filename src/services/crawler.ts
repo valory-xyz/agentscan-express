@@ -607,6 +607,7 @@ export async function crawl_website(
             return null;
           })
           .filter(Boolean);
+        console.log(`[Depth ${currentDepth}] Crawl promises:`, crawlPromises);
 
         // Update batch processing logging
         console.log(`[Depth ${currentDepth}] Processing batch:`, {
