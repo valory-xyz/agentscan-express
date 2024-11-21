@@ -41,7 +41,6 @@ const TIMEOUTS = {
   SCRAPE_OPERATION: 45000, // 45 seconds for scraping content
   FILTER_CONTENT: 60000, // 60 seconds for content filtering
   EMBEDDING_GENERATION: 30000, // 30 seconds for embedding generation
-  CRAWL_OPERATION: 600000, // 10 minutes for complete crawl of a single URL
 };
 
 // Add a reusable retry utility
@@ -515,8 +514,6 @@ export async function crawl_website(
         }
       }
 
-      // Increase timeout duration and add progress tracking
-      const timeoutDuration = 60000; // Increase to 60 seconds
       const processedUrls = new Set();
 
       console.log(`Processing ${links.length} links from ${base_url}`);
@@ -555,15 +552,7 @@ export async function crawl_website(
                   }
                 );
 
-                const timeoutPromise = new Promise((_, reject) =>
-                  setTimeout(
-                    () =>
-                      reject(new Error(`Crawl timeout for ${normalizedLink}`)),
-                    TIMEOUTS.CRAWL_OPERATION
-                  )
-                );
-
-                return await Promise.race([crawlPromise, timeoutPromise]);
+                return await Promise.race([crawlPromise]);
               } catch (error) {
                 console.error(
                   `Failed to crawl ${normalizedLink}:`,
