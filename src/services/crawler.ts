@@ -9,6 +9,9 @@ import openai from "../initalizers/openai";
 import { MAX_TOKENS, splitTextIntoChunks } from "./openai";
 import { executeQuery, safeQueueOperation } from "./postgres";
 
+import chromium from "@sparticuz/chromium";
+import { executablePath } from "puppeteer";
+
 // Simplify the status enum
 enum ProcessingStatus {
   PENDING = "pending",
@@ -19,17 +22,17 @@ enum ProcessingStatus {
 
 // Modify the dbQueue to have lower concurrency
 export const dbQueue = new PQueue({
-  concurrency: 2, // Reduced from 5
-  timeout: 120000,
+  concurrency: 1, // Reduced further for Railway
+  timeout: 180000, // Increased timeout
   throwOnTimeout: true,
 }).on("error", async (error) => {
-  console.log(`Database operation failed: ${error.message}`);
+  console.error(`Database operation failed: ${error.message}`);
 });
 
 // Add a crawling queue to limit concurrent page scraping
 const crawlQueue = new PQueue({
-  concurrency: 7, // Only process 3 pages at a time
-  interval: 1000, // Add a 1 second interval between tasks
+  concurrency: 3, // Reduced for Railway
+  interval: 2000, // Increased interval
 });
 
 async function scrape_website(url: string) {
@@ -37,8 +40,16 @@ async function scrape_website(url: string) {
     async () => {
       const browser = await puppeteer.launch({
         headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
-        timeout: 60000,
+        executablePath: await chromium.executablePath(),
+        args: [
+          ...chromium.args,
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-gpu",
+          "--disable-dev-shm-usage",
+          "--single-process",
+        ],
+        defaultViewport: chromium.defaultViewport,
       });
 
       const page = await browser.newPage();
