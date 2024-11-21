@@ -45,7 +45,7 @@ const TIMEOUTS = {
 
 // Add these new timeout constants
 const CRAWL_TIMEOUTS = {
-  BATCH_PROCESSING: 180000, // 3 minutes per batch
+  BATCH_PROCESSING: 300000, // 3 minutes per batch
   SINGLE_URL_CRAWL: 60000, // 1 minute per URL
 };
 

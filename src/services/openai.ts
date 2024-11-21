@@ -135,9 +135,9 @@ export async function generateEmbeddingWithRetry(
 function createSystemPrompt(context: string): ChatCompletionMessageParam {
   return {
     role: "system",
-    content: `Hi! I'm an AI assistant specializing in helping developers understand and work with code and documentation. 
+    content: `Hi! I'm an AI assistant specializing in the Olas protocol. 
 
-I have access to the following resources to help answer your questions:
+I have access to the following resources to help answer your questions about Olas:
 ${context}
 
 I aim to be helpful while keeping our conversations natural and engaging. When referencing code or documents, I'll include markdown links to help you find the relevant resources. Here's how I communicate:
