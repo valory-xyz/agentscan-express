@@ -33,56 +33,90 @@ const crawlQueue = new PQueue({
 async function scrape_website(url: string) {
   return withRetry(
     async () => {
-      const browser = await puppeteer.launch({
-        headless: true,
-        executablePath: await chromium.executablePath(),
-        args: [
-          ...chromium.args,
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-gpu",
-          "--disable-dev-shm-usage",
-          "--single-process",
-        ],
-        defaultViewport: chromium.defaultViewport,
-      });
-
-      const page = await browser.newPage();
-      await page.setDefaultNavigationTimeout(45000);
-      await page.setDefaultTimeout(45000);
-
+      let browser;
       try {
-        await page.setRequestInterception(true);
-        page.on("request", (request) => {
-          const blockedResourceTypes = ["image", "font", "stylesheet"];
-          if (blockedResourceTypes.includes(request.resourceType())) {
-            request.abort();
-          } else {
-            request.continue();
-          }
-        });
+        const isDevelopment = process.env.NODE_ENV === "development";
+        console.log(`Starting scrape for ${url}`);
 
-        await page.goto(url, {
-          waitUntil: "networkidle2",
-          timeout: 60000,
-        });
+        const launchOptions = isDevelopment
+          ? {
+              headless: true,
+              args: ["--no-sandbox", "--disable-setuid-sandbox"],
+            }
+          : {
+              headless: true,
+              executablePath: await chromium.executablePath(),
+              args: [
+                ...chromium.args,
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-gpu",
+                "--disable-dev-shm-usage",
+                "--single-process",
+              ],
+              defaultViewport: chromium.defaultViewport,
+              ignoreHTTPSErrors: true,
+            };
 
-        const content = await page.evaluate(() => {
-          const doc = document as Document;
-          return {
-            bodyText: doc.body.innerText,
-            links: Array.from(doc.querySelectorAll("a")).map(
-              (link) => link.href
-            ),
-          };
-        });
+        console.log(`Attempting to launch browser for ${url}`);
+        browser = await puppeteer.launch(launchOptions);
+        console.log(`Browser launched successfully for ${url}`);
 
-        return content;
-      } finally {
-        await browser.close();
+        const page = await browser.newPage();
+        console.log(`New page created for ${url}`);
+
+        try {
+          await page.setRequestInterception(true);
+          console.log(`Navigating to ${url}`);
+          await page.goto(url, {
+            waitUntil: "networkidle2",
+            timeout: 60000,
+          });
+          console.log(`Successfully loaded ${url}`);
+
+          const used = process.memoryUsage();
+          console.log("Memory usage before scraping:", {
+            rss: `${Math.round(used.rss / 1024 / 1024)}MB`,
+            heapTotal: `${Math.round(used.heapTotal / 1024 / 1024)}MB`,
+            heapUsed: `${Math.round(used.heapUsed / 1024 / 1024)}MB`,
+          });
+
+          const content = await page.evaluate(() => {
+            const doc = document as Document;
+            return {
+              bodyText: doc.body.innerText,
+              links: Array.from(doc.querySelectorAll("a")).map(
+                (link) => link.href
+              ),
+            };
+          });
+
+          return content;
+        } finally {
+          await browser.close();
+        }
+      } catch (error: any) {
+        console.error("Browser operation error:", {
+          message: error.message,
+          stack: error.stack,
+          code: error.code,
+          signal: error.signal,
+          url: url,
+        });
+        if (browser) {
+          await browser
+            .close()
+            .catch((closeError) =>
+              console.error("Error closing browser:", closeError)
+            );
+        }
+        throw error;
       }
     },
-    { maxRetries: 3, initialDelay: 1000 }
+    {
+      maxRetries: 3,
+      initialDelay: 2000,
+    }
   );
 }
 
