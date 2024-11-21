@@ -218,9 +218,14 @@ async function downloadAndProcessPdf(url: string): Promise<string> {
   }
 }
 
-// Update isValidUrl function to be more permissive for internal URLs
+// Update isValidUrl function to exclude email links
 function isValidUrl(url: string): boolean {
   try {
+    // Skip mailto: links
+    if (url.toLowerCase().startsWith("mailto:")) {
+      return false;
+    }
+
     // Check if URL is a PDF
     if (
       url.toLowerCase().endsWith(".pdf") ||
