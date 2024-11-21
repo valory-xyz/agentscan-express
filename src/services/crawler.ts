@@ -782,6 +782,8 @@ export async function crawl_website(
                       ),
                     ]);
                   });
+                } else {
+                  console.log(`Skipping link: ${normalizedLink}`);
                 }
                 return null;
               })
