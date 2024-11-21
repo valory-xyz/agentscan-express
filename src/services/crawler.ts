@@ -473,7 +473,7 @@ async function processDocument(
           })
         )
       );
-      console.log(`Processed document: ${normalizedUrl}`, result);
+      console.log(`Processed document: ${normalizedUrl}`, results);
       return results.every(
         (result: any) => result.status === "fulfilled" && result.value !== null
       );
