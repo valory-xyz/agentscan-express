@@ -46,92 +46,97 @@ function normalizeUrl(url: string): string {
 }
 
 async function scrape_website(url: string) {
-  return withRetry(
-    async () => {
-      let browser;
-      try {
-        const isDevelopment = process.env.NODE_ENV === "development";
-        console.log(`Starting scrape for ${url}`);
-
-        const launchOptions = {
-          headless: true,
-          args: ["--no-sandbox", "--disable-setuid-sandbox"],
-        };
-
-        console.log(`Attempting to launch browser for ${url}`);
-        browser = await chromium.launch(launchOptions);
-        console.log(`Browser launched successfully for ${url}`);
-
-        const context = await browser.newContext();
-        const page = await context.newPage();
-        console.log(`New page created for ${url}`);
-
+  try {
+    return withRetry(
+      async () => {
+        let browser;
         try {
-          console.log(`Navigating to ${url}`);
-          await page.goto(url, {
-            waitUntil: "networkidle",
-            timeout: 60000,
-          });
-          console.log(`Successfully loaded ${url}`);
+          const isDevelopment = process.env.NODE_ENV === "development";
+          console.log(`Starting scrape for ${url}`);
 
-          const used = process.memoryUsage();
-          console.log("Memory usage before scraping:", {
-            rss: `${Math.round(used.rss / 1024 / 1024)}MB`,
-            heapTotal: `${Math.round(used.heapTotal / 1024 / 1024)}MB`,
-            heapUsed: `${Math.round(used.heapUsed / 1024 / 1024)}MB`,
-          });
+          const launchOptions = {
+            headless: true,
+            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+          };
 
-          const content = await page.evaluate(() => {
-            const links = Array.from(document.querySelectorAll("a"))
-              .map((link) => link.href)
-              .filter((href) => href && !href.startsWith("javascript:")); // Filter out javascript: links
+          console.log(`Attempting to launch browser for ${url}`);
+          browser = await chromium.launch(launchOptions);
+          console.log(`Browser launched successfully for ${url}`);
 
-            // Remove duplicates using Set
-            const uniqueLinks = [...new Set(links)];
+          const context = await browser.newContext();
+          const page = await context.newPage();
+          console.log(`New page created for ${url}`);
 
-            return {
-              bodyText: document.body.innerText,
-              links: uniqueLinks,
-            };
-          });
+          try {
+            console.log(`Navigating to ${url}`);
+            await page.goto(url, {
+              waitUntil: "networkidle",
+              timeout: 60000,
+            });
+            console.log(`Successfully loaded ${url}`);
 
-          // Normalize all links
-          content.links = content.links.map(normalizeUrl).filter(
-            (link, index, self) =>
-              // Remove duplicates after normalization
-              self.indexOf(link) === index &&
-              // Ensure link is valid
-              isValidUrl(link)
-          );
+            const used = process.memoryUsage();
+            console.log("Memory usage before scraping:", {
+              rss: `${Math.round(used.rss / 1024 / 1024)}MB`,
+              heapTotal: `${Math.round(used.heapTotal / 1024 / 1024)}MB`,
+              heapUsed: `${Math.round(used.heapUsed / 1024 / 1024)}MB`,
+            });
 
-          return content;
-        } finally {
-          await context.close();
-          await browser.close();
-        }
-      } catch (error: any) {
-        console.error("Browser operation error:", {
-          message: error.message,
-          stack: error.stack,
-          code: error.code,
-          signal: error.signal,
-          url: url,
-        });
-        if (browser) {
-          await browser
-            .close()
-            .catch((closeError) =>
-              console.error("Error closing browser:", closeError)
+            const content = await page.evaluate(() => {
+              const links = Array.from(document.querySelectorAll("a"))
+                .map((link) => link.href)
+                .filter((href) => href && !href.startsWith("javascript:")); // Filter out javascript: links
+
+              // Remove duplicates using Set
+              const uniqueLinks = [...new Set(links)];
+
+              return {
+                bodyText: document.body.innerText,
+                links: uniqueLinks,
+              };
+            });
+
+            // Normalize all links
+            content.links = content.links.map(normalizeUrl).filter(
+              (link, index, self) =>
+                // Remove duplicates after normalization
+                self.indexOf(link) === index &&
+                // Ensure link is valid
+                isValidUrl(link)
             );
+
+            return content;
+          } finally {
+            await context.close();
+            await browser.close();
+          }
+        } catch (error: any) {
+          console.error("Browser operation error:", {
+            message: error.message,
+            stack: error.stack,
+            code: error.code,
+            signal: error.signal,
+            url: url,
+          });
+          if (browser) {
+            await browser
+              .close()
+              .catch((closeError) =>
+                console.error("Error closing browser:", closeError)
+              );
+          }
+          throw error;
         }
-        throw error;
+      },
+      {
+        maxRetries: 3,
+        initialDelay: 2000,
       }
-    },
-    {
-      maxRetries: 3,
-      initialDelay: 2000,
-    }
-  );
+    );
+  } catch (error) {
+    console.error("Fatal error in scrape_website:", error);
+    return { bodyText: "", links: [] }; // Return empty result instead of crashing
+  }
 }
 
 // Add type for retry options
@@ -171,57 +176,62 @@ export async function generateEmbeddingWithRetry(
   text: string,
   options?: RetryOptions
 ): Promise<number[]> {
-  // Check cache first
-  const cached = embeddingCache.get(text);
-  if (cached) return cached;
+  try {
+    // Check cache first
+    const cached = embeddingCache.get(text);
+    if (cached) return cached;
 
-  const embedding = await withRetry(async () => {
-    const response = await openai.embeddings.create({
-      model: "text-embedding-3-small",
-      input: text,
-      dimensions: 512,
-    });
-    return toSql(response.data?.[0]?.embedding);
-  }, options);
+    const embedding = await withRetry(async () => {
+      const response = await openai.embeddings.create({
+        model: "text-embedding-3-small",
+        input: text,
+        dimensions: 512,
+      });
+      return toSql(response.data?.[0]?.embedding);
+    }, options);
 
-  // Cache the result
-  embeddingCache.set(text, embedding);
-  return embedding;
+    // Cache the result
+    embeddingCache.set(text, embedding);
+    return embedding;
+  } catch (error) {
+    console.error("Fatal error in generateEmbeddingWithRetry:", error);
+    return []; // Return empty embedding instead of crashing
+  }
 }
 
 async function filter_content(raw_text: string) {
-  // Skip processing if text is empty or too short
-  if (!raw_text || raw_text.length < 50) {
-    console.log("Raw text too short, skipping filtering");
-    return null;
-  }
-
-  const prompt = `
-    You are a content extraction specialist. Your task is to:
-    1. Extract only the main, meaningful content from the provided text
-    2. Remove all of the following:
-       - Navigation menus and headers
-       - Advertisements
-       - Cookie notices
-       - Legal disclaimers and footers
-       - Social media buttons/widgets
-       - Search bars and forms
-       - Repetitive elements
-    3. Preserve:
-       - Main article content
-       - Important headings
-       - Relevant code examples or technical documentation
-       - Key product information
-    4. Format the output as clean, readable text
-
-    Return only the processed content, without any explanations.
-
-    Content to process:
-    
-    ${raw_text.slice(0, 8000).replace(/\n/g, " ")}
-  `;
-
   try {
+    // Skip processing if text is empty or too short
+    if (!raw_text || raw_text.length < 50) {
+      console.log("Raw text too short, skipping filtering");
+      return null;
+    }
+
+    const prompt = `
+      You are a content extraction specialist. Your task is to:
+      1. Extract only the main, meaningful content from the provided text
+      2. Remove all of the following:
+         - Navigation menus and headers
+         - Advertisements
+         - Cookie notices
+         - Legal disclaimers and footers
+         - Social media buttons/widgets
+         - Search bars and forms
+         - Repetitive elements
+      3. Preserve:
+         - Main article content
+         - Important headings
+         - Relevant code examples or technical documentation
+         - Key product information
+      4. Format the output as clean, readable text
+
+      Return only the processed content, without any explanations.
+
+      Content to process:
+      
+      ${raw_text.slice(0, 8000).replace(/\n/g, " ")}
+    `;
+
     console.log(`Attempting to filter content of length: ${raw_text.length}`);
 
     const response = await withRetry(
@@ -260,11 +270,8 @@ async function filter_content(raw_text: string) {
       `Successfully filtered content. New length: ${filtered_content.length}`
     );
     return filtered_content;
-  } catch (error: any) {
-    console.error(`Failed to filter content: ${error.message}`, {
-      error,
-      stackTrace: error.stack,
-    });
+  } catch (error) {
+    console.error("Fatal error in filter_content:", error);
     return null;
   }
 }
@@ -277,55 +284,60 @@ async function updateProcessingStatus(
   organization_id: string,
   errorMessage?: string
 ): Promise<void> {
-  await dbQueue.add(async () => {
-    await executeQuery(async (client) => {
-      if (status === ProcessingStatus.COMPLETED) {
-        await client.query(
-          `INSERT INTO context_processing_status (
-            id,
-            company_id,
-            type,
-            location,
-            name,
-            status,
-            error_message,
-            updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-          ON CONFLICT (id, type) DO UPDATE SET
-            location = EXCLUDED.location,
-            name = EXCLUDED.name,
-            status = EXCLUDED.status,
-            error_message = EXCLUDED.error_message,
-            updated_at = NOW()`,
-          [
-            urlId,
-            organization_id,
-            "document",
-            url,
-            url,
-            status,
-            errorMessage || null,
-          ]
-        );
-      } else {
-        await client.query(
-          `INSERT INTO context_processing_status (
-            id,
-            company_id,
-            type,
-            status,
-            error_message,
-            updated_at
-          ) VALUES ($1, $2, $3, $4, $5, NOW())
-          ON CONFLICT (id, type) DO UPDATE SET
-            status = EXCLUDED.status,
-            error_message = EXCLUDED.error_message,
-            updated_at = NOW()`,
-          [urlId, organization_id, "document", status, errorMessage || null]
-        );
-      }
+  try {
+    await dbQueue.add(async () => {
+      await executeQuery(async (client) => {
+        if (status === ProcessingStatus.COMPLETED) {
+          await client.query(
+            `INSERT INTO context_processing_status (
+              id,
+              company_id,
+              type,
+              location,
+              name,
+              status,
+              error_message,
+              updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+            ON CONFLICT (id, type) DO UPDATE SET
+              location = EXCLUDED.location,
+              name = EXCLUDED.name,
+              status = EXCLUDED.status,
+              error_message = EXCLUDED.error_message,
+              updated_at = NOW()`,
+            [
+              urlId,
+              organization_id,
+              "document",
+              url,
+              url,
+              status,
+              errorMessage || null,
+            ]
+          );
+        } else {
+          await client.query(
+            `INSERT INTO context_processing_status (
+              id,
+              company_id,
+              type,
+              status,
+              error_message,
+              updated_at
+            ) VALUES ($1, $2, $3, $4, $5, NOW())
+            ON CONFLICT (id, type) DO UPDATE SET
+              status = EXCLUDED.status,
+              error_message = EXCLUDED.error_message,
+              updated_at = NOW()`,
+            [urlId, organization_id, "document", status, errorMessage || null]
+          );
+        }
+      });
     });
-  });
+  } catch (error) {
+    console.error("Fatal error in updateProcessingStatus:", error);
+    // No return needed as function is void
+  }
 }
 
 // Add this function near the top with other utility functions
@@ -360,152 +372,157 @@ export async function crawl_website(
   max_depth: number = 50,
   organization_id: string
 ) {
-  const normalizedBaseUrl = normalizeUrl(base_url);
-
-  // Skip invalid URLs early
-  if (!isValidUrl(normalizedBaseUrl)) {
-    console.log(`Skipping invalid or search URL: ${normalizedBaseUrl}`);
-    return [];
-  }
-
-  const urlId = crypto
-    .createHash("sha256")
-    .update(normalizedBaseUrl)
-    .digest("hex");
-
-  // Check status but don't return early
-  const status = await dbQueue.add(async () => {
-    const result = await executeQuery(async (client) => {
-      const res = await client.query(
-        `SELECT status FROM context_processing_status 
-         WHERE id = $1 AND type = 'document' AND company_id = $2`,
-        [urlId, organization_id]
-      );
-      return res.rows[0]?.status;
-    });
-    return result;
-  });
-
-  const shouldProcessContent = status !== ProcessingStatus.COMPLETED;
-  if (!shouldProcessContent) {
-    console.log(
-      `${base_url} was previously processed - skipping content processing`
-    );
-  }
-
-  console.log(`Crawling: ${base_url}`);
-
   try {
-    if (shouldProcessContent) {
-      console.log(`Updating processing status for ${base_url}`);
+    const normalizedBaseUrl = normalizeUrl(base_url);
+
+    // Skip invalid URLs early
+    if (!isValidUrl(normalizedBaseUrl)) {
+      console.log(`Skipping invalid or search URL: ${normalizedBaseUrl}`);
+      return [];
+    }
+
+    const urlId = crypto
+      .createHash("sha256")
+      .update(normalizedBaseUrl)
+      .digest("hex");
+
+    // Check status but don't return early
+    const status = await dbQueue.add(async () => {
+      const result = await executeQuery(async (client) => {
+        const res = await client.query(
+          `SELECT status FROM context_processing_status 
+           WHERE id = $1 AND type = 'document' AND company_id = $2`,
+          [urlId, organization_id]
+        );
+        return res.rows[0]?.status;
+      });
+      return result;
+    });
+
+    const shouldProcessContent = status !== ProcessingStatus.COMPLETED;
+    if (!shouldProcessContent) {
+      console.log(
+        `${base_url} was previously processed - skipping content processing`
+      );
+    }
+
+    console.log(`Crawling: ${base_url}`);
+
+    try {
+      if (shouldProcessContent) {
+        console.log(`Updating processing status for ${base_url}`);
+        await updateProcessingStatus(
+          urlId,
+          base_url,
+          ProcessingStatus.PROCESSING,
+          organization_id
+        );
+      }
+
+      console.log(`Starting scrape for ${base_url}`);
+      const { bodyText, links } = await scrape_website(base_url);
+      console.log(
+        `Scraped content for ${base_url}, content length: ${bodyText.length}`
+      );
+
+      // Only filter and process content if it hasn't been processed before
+      if (shouldProcessContent) {
+        console.log(`Starting content filtering for ${base_url}`);
+        const filtered_content = await filter_content(bodyText);
+        console.log(
+          `Filtered content for ${base_url}, filtered length: ${
+            filtered_content?.length || 0
+          }`
+        );
+
+        if (filtered_content) {
+          console.log(`Starting document processing for ${base_url}`);
+          const success = await processDocument(
+            base_url,
+            filtered_content,
+            organization_id
+          );
+          console.log(
+            `Document processing ${
+              success ? "succeeded" : "failed"
+            } for ${base_url}`
+          );
+
+          await updateProcessingStatus(
+            urlId,
+            base_url,
+            success ? ProcessingStatus.COMPLETED : ProcessingStatus.FAILED,
+            organization_id,
+            success ? undefined : "Failed to process document"
+          );
+        } else {
+          console.log(`No filtered content produced for ${base_url}`);
+          await updateProcessingStatus(
+            urlId,
+            base_url,
+            ProcessingStatus.FAILED,
+            organization_id,
+            "No content after filtering"
+          );
+        }
+      }
+
+      // Add timeout for crawling sub-pages
+      const timeoutDuration = 10000; // 10 seconds
+
+      console.log(`Processing ${links.length} links from ${base_url}`);
+
+      const crawlPromises = links
+        .map((link) => {
+          if (link.startsWith("/")) {
+            link = new URL(link, normalizedBaseUrl).toString();
+          }
+          const normalizedLink = normalizeUrl(link);
+          if (
+            normalizedLink.startsWith(normalizedBaseUrl) &&
+            max_depth > 0 &&
+            isValidUrl(normalizedLink)
+          ) {
+            return Promise.race([
+              crawlQueue.add(() =>
+                crawl_website(normalizedLink, max_depth - 1, organization_id)
+              ),
+              new Promise((_, reject) =>
+                setTimeout(
+                  () => reject(new Error(`Timeout crawling ${normalizedLink}`)),
+                  timeoutDuration
+                )
+              ),
+            ]).catch((error) => {
+              console.error(
+                `Failed to crawl ${normalizedLink}: ${error.message}`
+              );
+              return [];
+            });
+          }
+        })
+        .filter(Boolean);
+
+      await Promise.all(crawlPromises);
+      console.log(`Completed processing all links for ${base_url}`);
+    } catch (error: any) {
+      console.error(`Failed to process ${base_url}:`, {
+        error: error.message,
+        stack: error.stack,
+        phase: "crawl_website",
+      });
       await updateProcessingStatus(
         urlId,
         base_url,
-        ProcessingStatus.PROCESSING,
-        organization_id
+        ProcessingStatus.FAILED,
+        organization_id,
+        error.message
       );
+      return [];
     }
-
-    console.log(`Starting scrape for ${base_url}`);
-    const { bodyText, links } = await scrape_website(base_url);
-    console.log(
-      `Scraped content for ${base_url}, content length: ${bodyText.length}`
-    );
-
-    // Only filter and process content if it hasn't been processed before
-    if (shouldProcessContent) {
-      console.log(`Starting content filtering for ${base_url}`);
-      const filtered_content = await filter_content(bodyText);
-      console.log(
-        `Filtered content for ${base_url}, filtered length: ${
-          filtered_content?.length || 0
-        }`
-      );
-
-      if (filtered_content) {
-        console.log(`Starting document processing for ${base_url}`);
-        const success = await processDocument(
-          base_url,
-          filtered_content,
-          organization_id
-        );
-        console.log(
-          `Document processing ${
-            success ? "succeeded" : "failed"
-          } for ${base_url}`
-        );
-
-        await updateProcessingStatus(
-          urlId,
-          base_url,
-          success ? ProcessingStatus.COMPLETED : ProcessingStatus.FAILED,
-          organization_id,
-          success ? undefined : "Failed to process document"
-        );
-      } else {
-        console.log(`No filtered content produced for ${base_url}`);
-        await updateProcessingStatus(
-          urlId,
-          base_url,
-          ProcessingStatus.FAILED,
-          organization_id,
-          "No content after filtering"
-        );
-      }
-    }
-
-    // Add timeout for crawling sub-pages
-    const timeoutDuration = 10000; // 10 seconds
-
-    console.log(`Processing ${links.length} links from ${base_url}`);
-
-    const crawlPromises = links
-      .map((link) => {
-        if (link.startsWith("/")) {
-          link = new URL(link, normalizedBaseUrl).toString();
-        }
-        const normalizedLink = normalizeUrl(link);
-        if (
-          normalizedLink.startsWith(normalizedBaseUrl) &&
-          max_depth > 0 &&
-          isValidUrl(normalizedLink)
-        ) {
-          return Promise.race([
-            crawlQueue.add(() =>
-              crawl_website(normalizedLink, max_depth - 1, organization_id)
-            ),
-            new Promise((_, reject) =>
-              setTimeout(
-                () => reject(new Error(`Timeout crawling ${normalizedLink}`)),
-                timeoutDuration
-              )
-            ),
-          ]).catch((error) => {
-            console.error(
-              `Failed to crawl ${normalizedLink}: ${error.message}`
-            );
-            return [];
-          });
-        }
-      })
-      .filter(Boolean);
-
-    await Promise.all(crawlPromises);
-    console.log(`Completed processing all links for ${base_url}`);
-  } catch (error: any) {
-    console.error(`Failed to process ${base_url}:`, {
-      error: error.message,
-      stack: error.stack,
-      phase: "crawl_website",
-    });
-    await updateProcessingStatus(
-      urlId,
-      base_url,
-      ProcessingStatus.FAILED,
-      organization_id,
-      error.message
-    );
-    return [];
+  } catch (error) {
+    console.error("Fatal error in crawl_website:", error);
+    return []; // Return empty array instead of crashing
   }
 }
 
@@ -515,10 +532,13 @@ async function processDocument(
   cleanedCodeContent: string,
   organization_id: string
 ): Promise<boolean> {
-  const normalizedUrl = normalizeUrl(url);
-  console.log(`Processing document: ${normalizedUrl}`);
-  const hash = crypto.createHash("sha256").update(normalizedUrl).digest("hex");
   try {
+    const normalizedUrl = normalizeUrl(url);
+    console.log(`Processing document: ${normalizedUrl}`);
+    const hash = crypto
+      .createHash("sha256")
+      .update(normalizedUrl)
+      .digest("hex");
     const embeddings = await generateEmbeddingWithRetry(cleanedCodeContent);
 
     if (!Array.isArray(embeddings) || embeddings.length === 1) {
@@ -617,7 +637,7 @@ async function processDocument(
       );
     }
   } catch (error) {
-    console.error(`Failed to process document for ${url}:`, error);
+    console.error("Fatal error in processDocument:", error);
     return false;
   }
 }
