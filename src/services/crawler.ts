@@ -508,7 +508,9 @@ async function filter_content(raw_text: string) {
       return null;
     }
 
-    const filtered_content = response.choices[0]?.message?.content?.trim();
+    const filtered_content = response.choices[0]?.message?.content
+      ?.trim()
+      .replace(/\n/g, "");
 
     // Add detailed logging
     console.log({
