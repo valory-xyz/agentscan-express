@@ -156,6 +156,7 @@ interface PDFData {
 async function downloadAndProcessPdf(url: string): Promise<string> {
   const tempDir = os.tmpdir();
   const tempFile = path.join(tempDir, `temp-${Date.now()}.pdf`);
+  let fileCreated = false;
 
   try {
     console.log(`Downloading PDF from: ${url}`);
@@ -164,9 +165,10 @@ async function downloadAndProcessPdf(url: string): Promise<string> {
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    const downloadPromise = fs.promises
-      .writeFile(tempFile, buffer)
-      .then(() => tempFile);
+    const downloadPromise = fs.promises.writeFile(tempFile, buffer).then(() => {
+      fileCreated = true;
+      return tempFile;
+    });
 
     const downloadedFile = await Promise.race([
       downloadPromise,
@@ -214,10 +216,17 @@ async function downloadAndProcessPdf(url: string): Promise<string> {
     );
     return cleanedText;
   } finally {
-    // Cleanup temp file
-    fs.unlink(tempFile, (err) => {
-      if (err) console.error("Error cleaning up PDF temp file:", err);
-    });
+    // Only attempt cleanup if the file was actually created
+    if (fileCreated) {
+      try {
+        await fs.promises.unlink(tempFile);
+      } catch (err) {
+        console.warn(
+          `Warning: Could not delete temporary PDF file ${tempFile}:`,
+          err
+        );
+      }
+    }
   }
 }
 
