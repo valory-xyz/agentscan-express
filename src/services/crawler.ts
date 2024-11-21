@@ -455,7 +455,8 @@ export async function crawl_website(
     }
 
     // Add timeout for crawling sub-pages
-    const timeoutDuration = 180000; // 3 minutes
+    const timeoutDuration = 10000; // 10 seconds
+
     console.log(`Processing ${links.length} links from ${base_url}`);
 
     const crawlPromises = links
