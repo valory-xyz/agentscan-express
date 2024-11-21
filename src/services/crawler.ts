@@ -361,7 +361,7 @@ export async function crawl_website(
         }
       })
       .filter(Boolean); // Filter out undefined promises
-    console.log(`Crawling ${base_url}`, crawlPromises);
+    console.log(`Crawling next -> ${base_url}`, crawlPromises);
     await Promise.all(crawlPromises);
   } catch (error: any) {
     console.error(`Failed to scrape ${base_url}: ${error.message}`);
