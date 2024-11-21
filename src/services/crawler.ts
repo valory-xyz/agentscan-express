@@ -28,7 +28,7 @@ export const dbQueue = new PQueue({
 
 // Add a crawling queue to limit concurrent page scraping
 const crawlQueue = new PQueue({
-  concurrency: 3, // Only process 3 pages at a time
+  concurrency: 7, // Only process 3 pages at a time
   interval: 1000, // Add a 1 second interval between tasks
 });
 
@@ -473,7 +473,7 @@ async function processDocument(
           })
         )
       );
-      console.log(`Processed document: ${normalizedUrl}`, results);
+      console.log(`Processed document: ${normalizedUrl}`, result);
       return results.every(
         (result: any) => result.status === "fulfilled" && result.value !== null
       );
