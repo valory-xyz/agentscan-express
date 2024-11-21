@@ -415,8 +415,9 @@ function isValidUrl(url: string): boolean {
 // Update the crawl_website function to use the validation
 export async function crawl_website(
   base_url: string,
-  max_depth: number = 50,
-  organization_id: string
+  max_depth: number = 20,
+  organization_id: string,
+  currentDepth: number = 0
 ) {
   try {
     const failedLinks = new Set<string>();
@@ -533,12 +534,9 @@ export async function crawl_website(
       );
 
       for (const batch of linkBatches) {
-        console.log(`Starting batch processing for ${base_url}:`, {
-          batchSize: batch.length,
-          totalProcessed: processedUrls.size,
-          remainingTotal: links.length - processedUrls.size,
-          currentDepth: max_depth,
-        });
+        console.log(
+          `[Depth ${currentDepth}/${max_depth}] Starting crawl for ${base_url}`
+        );
 
         const crawlPromises = batch
           .map((link) => {
@@ -549,6 +547,9 @@ export async function crawl_website(
 
             // Skip if already processed
             if (processedUrls.has(normalizedLink)) {
+              console.log(
+                `[Depth ${currentDepth}] Skipping already processed: ${normalizedLink}`
+              );
               return null;
             }
             processedUrls.add(normalizedLink);
@@ -560,12 +561,17 @@ export async function crawl_website(
             ) {
               return crawlQueue.add(async () => {
                 try {
+                  console.log(
+                    `[Depth ${currentDepth}] Queuing recursive crawl: ${normalizedLink}`
+                  );
+
                   const crawlPromise = withRetry(
                     async () => {
                       return crawl_website(
                         normalizedLink,
                         max_depth - 1,
-                        organization_id
+                        organization_id,
+                        currentDepth + 1
                       );
                     },
                     {
@@ -574,19 +580,23 @@ export async function crawl_website(
                     }
                   );
 
-                  return await Promise.race([
+                  const result = await Promise.race([
                     crawlPromise,
-                    new Promise(
-                      (_, reject) =>
-                        setTimeout(
-                          () => reject(new Error("Crawl timeout")),
-                          300000
-                        ) // 5 minute timeout
+                    new Promise((_, reject) =>
+                      setTimeout(
+                        () => reject(new Error("Crawl timeout")),
+                        300000
+                      )
                     ),
                   ]);
+
+                  console.log(
+                    `[Depth ${currentDepth}] Completed recursive crawl: ${normalizedLink}`
+                  );
+                  return result;
                 } catch (error) {
                   console.error(
-                    `Failed to crawl ${normalizedLink}:`,
+                    `[Depth ${currentDepth}] Failed to crawl ${normalizedLink}:`,
                     error instanceof Error ? error.message : error
                   );
                   failedLinks.add(normalizedLink);
@@ -597,6 +607,18 @@ export async function crawl_website(
             return null;
           })
           .filter(Boolean);
+
+        // Update batch processing logging
+        console.log(`[Depth ${currentDepth}] Processing batch:`, {
+          baseUrl: base_url,
+          batchSize: batch.length,
+          totalProcessed: processedUrls.size,
+          remainingTotal: links.length - processedUrls.size,
+          currentDepth,
+          maxDepth: max_depth,
+          queueSize: crawlQueue.size,
+          pendingQueue: crawlQueue.pending,
+        });
 
         // Process each batch with Promise.allSettled
         const results = await Promise.allSettled(crawlPromises);

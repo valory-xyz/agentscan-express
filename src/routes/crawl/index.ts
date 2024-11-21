@@ -5,7 +5,7 @@ const router = express.Router();
 
 router.post("/", async (req, res) => {
   try {
-    const { url: rawUrl, maxDepth = 50, organization_id } = req.body;
+    const { url: rawUrl, maxDepth = 20, organization_id } = req.body;
 
     if (!rawUrl || !organization_id) {
       return res
