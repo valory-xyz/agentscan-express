@@ -406,39 +406,58 @@ export async function crawl_website(
       );
     }
 
+    console.log(`Starting scrape for ${base_url}`);
     const { bodyText, links } = await scrape_website(base_url);
-    console.log(`Scraped content for ${base_url}`);
+    console.log(
+      `Scraped content for ${base_url}, content length: ${bodyText.length}`
+    );
 
     // Only filter and process content if it hasn't been processed before
     if (shouldProcessContent) {
+      console.log(`Starting content filtering for ${base_url}`);
       const filtered_content = await filter_content(bodyText);
-      console.log(`Filtered content for ${base_url}`);
+      console.log(
+        `Filtered content for ${base_url}, filtered length: ${
+          filtered_content?.length || 0
+        }`
+      );
+
       if (filtered_content) {
+        console.log(`Starting document processing for ${base_url}`);
         const success = await processDocument(
           base_url,
           filtered_content,
           organization_id
         );
-        if (success) {
-          await updateProcessingStatus(
-            urlId,
-            base_url,
-            ProcessingStatus.COMPLETED,
-            organization_id
-          );
-        } else {
-          await updateProcessingStatus(
-            urlId,
-            base_url,
-            ProcessingStatus.FAILED,
-            organization_id,
-            "Failed to process document"
-          );
-        }
+        console.log(
+          `Document processing ${
+            success ? "succeeded" : "failed"
+          } for ${base_url}`
+        );
+
+        await updateProcessingStatus(
+          urlId,
+          base_url,
+          success ? ProcessingStatus.COMPLETED : ProcessingStatus.FAILED,
+          organization_id,
+          success ? undefined : "Failed to process document"
+        );
+      } else {
+        console.log(`No filtered content produced for ${base_url}`);
+        await updateProcessingStatus(
+          urlId,
+          base_url,
+          ProcessingStatus.FAILED,
+          organization_id,
+          "No content after filtering"
+        );
       }
     }
 
-    // Continue with navigation regardless of processing status
+    // Add timeout for crawling sub-pages
+    const timeoutDuration = 180000; // 3 minutes
+    console.log(`Processing ${links.length} links from ${base_url}`);
+
     const crawlPromises = links
       .map((link) => {
         if (link.startsWith("/")) {
@@ -450,20 +469,39 @@ export async function crawl_website(
           max_depth > 0 &&
           isValidUrl(normalizedLink)
         ) {
-          return crawlQueue.add(() =>
-            crawl_website(normalizedLink, max_depth - 1, organization_id)
-          );
+          return Promise.race([
+            crawlQueue.add(() =>
+              crawl_website(normalizedLink, max_depth - 1, organization_id)
+            ),
+            new Promise((_, reject) =>
+              setTimeout(
+                () => reject(new Error(`Timeout crawling ${normalizedLink}`)),
+                timeoutDuration
+              )
+            ),
+          ]).catch((error) => {
+            console.error(
+              `Failed to crawl ${normalizedLink}: ${error.message}`
+            );
+            return [];
+          });
         }
       })
       .filter(Boolean);
 
     await Promise.all(crawlPromises);
+    console.log(`Completed processing all links for ${base_url}`);
   } catch (error: any) {
-    console.error(`Failed to scrape ${base_url}: ${error.message}`);
+    console.error(`Failed to process ${base_url}:`, {
+      error: error.message,
+      stack: error.stack,
+      phase: "crawl_website",
+    });
     await updateProcessingStatus(
       urlId,
       base_url,
       ProcessingStatus.FAILED,
+      organization_id,
       error.message
     );
     return [];
