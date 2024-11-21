@@ -303,6 +303,7 @@ export async function crawl_website(
   organization_id: string
 ) {
   const normalizedUrl = normalizeUrl(base_url);
+
   const urlId = crypto.createHash("sha256").update(normalizedUrl).digest("hex");
 
   // Check status but don't return early
@@ -378,7 +379,6 @@ export async function crawl_website(
         }
         if (link.startsWith(base_url) && max_depth > 0) {
           link = link.replace(/\/$/, "");
-          console.log(`Crawling next -> ${link}`);
           return crawlQueue.add(() =>
             crawl_website(link, max_depth - 1, organization_id)
           );
