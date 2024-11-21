@@ -16,7 +16,7 @@ enum ProcessingStatus {
 
 // Modify the dbQueue to have lower concurrency
 export const dbQueue = new PQueue({
-  concurrency: 4, // Reduced further for Railway
+  concurrency: 2, // Reduced further for Railway
   timeout: 180000, // Increased timeout
   throwOnTimeout: true,
 }).on("error", async (error) => {
@@ -31,8 +31,8 @@ interface RetryOptions {
 
 // Add a crawling queue to limit concurrent page scraping
 const crawlQueue = new PQueue({
-  concurrency: 4, // Reduced for Railway
-  interval: 2000, // Increased interval
+  concurrency: 2, // Reduced for Railway
+  interval: 5000, // Increased interval
 });
 
 // Add these timeout constants at the top
