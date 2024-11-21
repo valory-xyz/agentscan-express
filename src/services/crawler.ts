@@ -1,11 +1,10 @@
-import puppeteer from "puppeteer";
+import { chromium } from "playwright";
 import { toSql } from "pgvector";
 import PQueue from "p-queue";
 import * as crypto from "crypto";
 import openai from "../initalizers/openai";
 import { MAX_TOKENS, splitTextIntoChunks } from "./openai";
 import { executeQuery, safeQueueOperation } from "./postgres";
-import chromium from "@sparticuz/chromium";
 
 // Simplify the status enum
 enum ProcessingStatus {
@@ -17,7 +16,7 @@ enum ProcessingStatus {
 
 // Modify the dbQueue to have lower concurrency
 export const dbQueue = new PQueue({
-  concurrency: 1, // Reduced further for Railway
+  concurrency: 4, // Reduced further for Railway
   timeout: 180000, // Increased timeout
   throwOnTimeout: true,
 }).on("error", async (error) => {
@@ -26,9 +25,25 @@ export const dbQueue = new PQueue({
 
 // Add a crawling queue to limit concurrent page scraping
 const crawlQueue = new PQueue({
-  concurrency: 3, // Reduced for Railway
+  concurrency: 4, // Reduced for Railway
   interval: 2000, // Increased interval
 });
+
+// Add this utility function near the top of the file
+function normalizeUrl(url: string): string {
+  try {
+    const parsedUrl = new URL(url);
+    // Remove trailing slashes, convert to lowercase, remove 'www.', and remove hash fragments
+    return parsedUrl
+      .toString()
+      .toLowerCase()
+      .replace(/\/$/, "") // Remove trailing slash
+      .replace(/^https?:\/\/www\./i, "https://") // Normalize www and protocol
+      .replace(/#.*$/, ""); // Remove hash fragments
+  } catch (error) {
+    return url;
+  }
+}
 
 async function scrape_website(url: string) {
   return withRetry(
@@ -38,38 +53,23 @@ async function scrape_website(url: string) {
         const isDevelopment = process.env.NODE_ENV === "development";
         console.log(`Starting scrape for ${url}`);
 
-        const launchOptions = isDevelopment
-          ? {
-              headless: true,
-              args: ["--no-sandbox", "--disable-setuid-sandbox"],
-            }
-          : {
-              headless: true,
-              executablePath: await chromium.executablePath(),
-              args: [
-                ...chromium.args,
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-gpu",
-                "--disable-dev-shm-usage",
-                "--single-process",
-              ],
-              defaultViewport: chromium.defaultViewport,
-              ignoreHTTPSErrors: true,
-            };
+        const launchOptions = {
+          headless: true,
+          args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        };
 
         console.log(`Attempting to launch browser for ${url}`);
-        browser = await puppeteer.launch(launchOptions);
+        browser = await chromium.launch(launchOptions);
         console.log(`Browser launched successfully for ${url}`);
 
-        const page = await browser.newPage();
+        const context = await browser.newContext();
+        const page = await context.newPage();
         console.log(`New page created for ${url}`);
 
         try {
-          await page.setRequestInterception(true);
           console.log(`Navigating to ${url}`);
           await page.goto(url, {
-            waitUntil: "networkidle2",
+            waitUntil: "networkidle",
             timeout: 60000,
           });
           console.log(`Successfully loaded ${url}`);
@@ -82,17 +82,31 @@ async function scrape_website(url: string) {
           });
 
           const content = await page.evaluate(() => {
-            const doc = document as Document;
+            const links = Array.from(document.querySelectorAll("a"))
+              .map((link) => link.href)
+              .filter((href) => href && !href.startsWith("javascript:")); // Filter out javascript: links
+
+            // Remove duplicates using Set
+            const uniqueLinks = [...new Set(links)];
+
             return {
-              bodyText: doc.body.innerText,
-              links: Array.from(doc.querySelectorAll("a")).map(
-                (link) => link.href
-              ),
+              bodyText: document.body.innerText,
+              links: uniqueLinks,
             };
           });
 
+          // Normalize all links
+          content.links = content.links.map(normalizeUrl).filter(
+            (link, index, self) =>
+              // Remove duplicates after normalization
+              self.indexOf(link) === index &&
+              // Ensure link is valid
+              isValidUrl(link)
+          );
+
           return content;
         } finally {
+          await context.close();
           await browser.close();
         }
       } catch (error: any) {
@@ -314,31 +328,50 @@ async function updateProcessingStatus(
   });
 }
 
-// Add this new utility function near the top of the file
-function normalizeUrl(url: string): string {
+// Add this function near the top with other utility functions
+function isValidUrl(url: string): boolean {
   try {
     const parsedUrl = new URL(url);
-    // Remove trailing slashes, convert to lowercase, remove 'www.'
-    return parsedUrl
-      .toString()
-      .toLowerCase()
-      .replace(/\/$/, "") // Remove trailing slash
-      .replace(/^https?:\/\/www\./i, "https://"); // Normalize www and protocol
+
+    // Skip search-related URLs
+    if (
+      parsedUrl.search || // Has query parameters
+      parsedUrl.pathname.includes("search") ||
+      parsedUrl.pathname.includes("?q=")
+    ) {
+      return false;
+    }
+
+    // Skip common search parameter patterns
+    const searchPatterns = ["/search", "query=", "q=", "search="];
+    if (searchPatterns.some((pattern) => url.includes(pattern))) {
+      return false;
+    }
+
+    return true;
   } catch (error) {
-    // If URL parsing fails, return original URL
-    return url;
+    return false;
   }
 }
 
-// Update the crawl_website function to use normalized URL
+// Update the crawl_website function to use the validation
 export async function crawl_website(
   base_url: string,
   max_depth: number = 50,
   organization_id: string
 ) {
-  const normalizedUrl = normalizeUrl(base_url);
+  const normalizedBaseUrl = normalizeUrl(base_url);
 
-  const urlId = crypto.createHash("sha256").update(normalizedUrl).digest("hex");
+  // Skip invalid URLs early
+  if (!isValidUrl(normalizedBaseUrl)) {
+    console.log(`Skipping invalid or search URL: ${normalizedBaseUrl}`);
+    return [];
+  }
+
+  const urlId = crypto
+    .createHash("sha256")
+    .update(normalizedBaseUrl)
+    .digest("hex");
 
   // Check status but don't return early
   const status = await dbQueue.add(async () => {
@@ -409,16 +442,20 @@ export async function crawl_website(
     const crawlPromises = links
       .map((link) => {
         if (link.startsWith("/")) {
-          link = new URL(link, base_url).toString();
+          link = new URL(link, normalizedBaseUrl).toString();
         }
-        if (link.startsWith(base_url) && max_depth > 0) {
-          link = link.replace(/\/$/, "");
+        const normalizedLink = normalizeUrl(link);
+        if (
+          normalizedLink.startsWith(normalizedBaseUrl) &&
+          max_depth > 0 &&
+          isValidUrl(normalizedLink)
+        ) {
           return crawlQueue.add(() =>
-            crawl_website(link, max_depth - 1, organization_id)
+            crawl_website(normalizedLink, max_depth - 1, organization_id)
           );
         }
       })
-      .filter(Boolean); // Filter out undefined promises
+      .filter(Boolean);
 
     await Promise.all(crawlPromises);
   } catch (error: any) {
