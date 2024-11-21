@@ -9,7 +9,8 @@
   "scripts": {
     "start": "npx tsx src/index.ts",
     "dev": "npx tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc --project tsconfig.json",
+    "postinstall": "npm run build",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",

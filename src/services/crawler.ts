@@ -2,18 +2,12 @@ import puppeteer from "puppeteer";
 import { toSql } from "pgvector";
 
 import PQueue from "p-queue";
-import * as path from "path";
+
 import * as crypto from "crypto";
 import openai from "../initalizers/openai";
 
 import { MAX_TOKENS, splitTextIntoChunks } from "./openai";
 import { executeQuery, safeQueueOperation } from "./postgres";
-// Add type for document-related operations
-declare global {
-  interface Window {
-    // Remove document declaration since it's already defined in lib.dom.d.ts
-  }
-}
 
 // Simplify the status enum
 enum ProcessingStatus {
@@ -67,12 +61,15 @@ async function scrape_website(url: string) {
           timeout: 60000,
         });
 
-        const content = await page.evaluate(() => ({
-          bodyText: document.body.innerText,
-          links: Array.from(document.querySelectorAll("a")).map(
-            (link) => link.href
-          ),
-        }));
+        const content = await page.evaluate(() => {
+          const doc = document as Document;
+          return {
+            bodyText: doc.body.innerText,
+            links: Array.from(doc.querySelectorAll("a")).map(
+              (link) => link.href
+            ),
+          };
+        });
 
         return content;
       } finally {
