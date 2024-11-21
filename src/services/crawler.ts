@@ -308,6 +308,7 @@ export async function crawl_website(
 
   try {
     if (shouldProcessContent) {
+      console.log(`Updating processing status for ${base_url}`);
       await updateProcessingStatus(
         urlId,
         base_url,
@@ -317,11 +318,12 @@ export async function crawl_website(
     }
 
     const { bodyText, links } = await scrape_website(base_url);
+    console.log(`Scraped content for ${base_url}`);
 
     // Only filter and process content if it hasn't been processed before
     if (shouldProcessContent) {
       const filtered_content = await filter_content(bodyText);
-
+      console.log(`Filtered content for ${base_url}`);
       if (filtered_content) {
         const success = await processDocument(
           base_url,
