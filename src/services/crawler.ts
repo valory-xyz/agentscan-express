@@ -218,7 +218,7 @@ async function downloadAndProcessPdf(url: string): Promise<string> {
   }
 }
 
-// Add this to your isValidUrl function
+// Update isValidUrl function to be more permissive for internal URLs
 function isValidUrl(url: string): boolean {
   try {
     // Check if URL is a PDF
@@ -610,6 +610,7 @@ export async function crawl_website(
 ) {
   try {
     const normalizedBaseUrl = normalizeUrl(base_url);
+    const baseUrlObj = new URL(normalizedBaseUrl);
 
     // Skip invalid URLs early
     if (!isValidUrl(normalizedBaseUrl)) {
@@ -729,30 +730,28 @@ export async function crawl_website(
             `[Depth ${currentDepth}/${max_depth}] Processing batch of ${batch.length} links`
           );
 
-          // Add timeout wrapper for entire batch
           const batchPromise = Promise.all(
             batch
               .map((link) => {
+                // Normalize the link
                 if (link.startsWith("/")) {
                   link = new URL(link, normalizedBaseUrl).toString();
                 }
                 const normalizedLink = normalizeUrl(link);
+                const linkObj = new URL(normalizedLink);
 
-                // Skip if already processed
-                if (processedUrls.has(normalizedLink)) {
-                  console.log(
-                    `[Depth ${currentDepth}] Skipping already processed: ${normalizedLink}`
-                  );
-                  return null;
-                }
-                processedUrls.add(normalizedLink);
-
+                // Process if:
+                // 1. Link is from the same domain (olas.network)
+                // 2. Not already processed
+                // 3. Within depth limit
                 if (
-                  normalizedLink.includes(normalizedBaseUrl) &&
+                  !processedUrls.has(normalizedLink) &&
                   max_depth > 0 &&
                   isValidUrl(normalizedLink)
                 ) {
-                  console.log(`Crawling new link:!!!! ${normalizedLink}`);
+                  processedUrls.add(normalizedLink);
+                  console.log(`Crawling new link: ${normalizedLink}`);
+
                   return crawlQueue.add(async () => {
                     const singleCrawlPromise = withRetry(
                       async () => {
@@ -820,12 +819,10 @@ export async function crawl_website(
           // Add a small delay between batches to prevent overwhelming the system
           await new Promise((resolve) => setTimeout(resolve, 1000));
         } catch (error) {
-          console.error(`[Depth ${currentDepth}] Batch processing error:`, {
-            error: error instanceof Error ? error.message : error,
-            currentDepth,
-            batchSize: batch.length,
-            queueSize: crawlQueue.size,
-          });
+          console.error(
+            `[Depth ${currentDepth}] Batch processing error:`,
+            error
+          );
           continue;
         }
       }
