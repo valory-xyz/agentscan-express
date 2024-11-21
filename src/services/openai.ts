@@ -132,58 +132,6 @@ export async function generateEmbeddingWithRetry(
   return embedding;
 }
 
-// Add this new utility function
-function removeDuplicateSentences(text: string): string {
-  // Split into sentences (considering multiple punctuation marks)
-  const sentences = text.split(/(?<=[.!?])\s+/);
-
-  // Enhanced normalization and similarity detection
-  const seen = new Set<string>();
-  const uniqueSentences = sentences.filter((sentence) => {
-    // More aggressive normalization
-    const normalized = sentence
-      .toLowerCase()
-      .replace(/\s+/g, " ")
-      .replace(/[.,!?;:()'"]/g, "")
-      .trim();
-
-    // Skip empty or very short sentences
-    if (!normalized || normalized.length < 5) {
-      return false;
-    }
-
-    // Check for exact matches
-    if (seen.has(normalized)) {
-      return false;
-    }
-
-    // Check for high similarity with existing sentences
-    for (const existingSentence of seen) {
-      const similarity = calculateSimilarity(normalized, existingSentence);
-      if (similarity > 0.8) {
-        // Threshold for similarity
-        return false;
-      }
-    }
-
-    seen.add(normalized);
-    return true;
-  });
-
-  return uniqueSentences.join(" ").replace(/\s+/g, " ").trim();
-}
-
-// Helper function to calculate similarity between two strings
-function calculateSimilarity(str1: string, str2: string): number {
-  const words1 = new Set(str1.split(" "));
-  const words2 = new Set(str2.split(" "));
-
-  const intersection = new Set([...words1].filter((x) => words2.has(x)));
-  const union = new Set([...words1, ...words2]);
-
-  return intersection.size / union.size;
-}
-
 function createSystemPrompt(context: string): ChatCompletionMessageParam {
   return {
     role: "system",

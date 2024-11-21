@@ -43,6 +43,12 @@ const TIMEOUTS = {
   EMBEDDING_GENERATION: 30000, // 30 seconds for embedding generation
 };
 
+// Add these new timeout constants
+const CRAWL_TIMEOUTS = {
+  BATCH_PROCESSING: 180000, // 3 minutes per batch
+  SINGLE_URL_CRAWL: 60000, // 1 minute per URL
+};
+
 // Add a reusable retry utility
 async function withRetry<T>(
   operation: () => Promise<T>,
@@ -516,128 +522,121 @@ export async function crawl_website(
       }
 
       const processedUrls = new Set();
-
       console.log(
         `Processing ${links.length} links from ${base_url} (depth: ${max_depth})`
       );
 
-      // Process links in smaller batches to prevent overwhelming the system
-      const BATCH_SIZE = 10;
+      // Create batches of links
+      const BATCH_SIZE = 8;
       const linkBatches = [];
       for (let i = 0; i < links.length; i += BATCH_SIZE) {
         linkBatches.push(links.slice(i, i + BATCH_SIZE));
       }
 
-      // Add more detailed logging before batch processing
-      console.log(
-        `Splitting ${links.length} links into batches of ${BATCH_SIZE} for ${base_url}`
-      );
-
       for (const batch of linkBatches) {
-        console.log(
-          `[Depth ${currentDepth}/${max_depth}] Starting crawl for ${base_url}`
-        );
+        try {
+          console.log(
+            `[Depth ${currentDepth}/${max_depth}] Processing batch of ${batch.length} links`
+          );
 
-        const crawlPromises = batch
-          .map((link) => {
-            if (link.startsWith("/")) {
-              link = new URL(link, normalizedBaseUrl).toString();
-            }
-            const normalizedLink = normalizeUrl(link);
-
-            // Skip if already processed
-            if (processedUrls.has(normalizedLink)) {
-              console.log(
-                `[Depth ${currentDepth}] Skipping already processed: ${normalizedLink}`
-              );
-              return null;
-            }
-            processedUrls.add(normalizedLink);
-
-            if (
-              normalizedLink.startsWith(normalizedBaseUrl) &&
-              max_depth > 0 &&
-              isValidUrl(normalizedLink)
-            ) {
-              return crawlQueue.add(async () => {
-                try {
-                  console.log(
-                    `[Depth ${currentDepth}] Queuing recursive crawl: ${normalizedLink}`
-                  );
-
-                  const crawlPromise = withRetry(
-                    async () => {
-                      return crawl_website(
-                        normalizedLink,
-                        max_depth - 1,
-                        organization_id,
-                        currentDepth + 1
-                      );
-                    },
-                    {
-                      maxRetries: 3,
-                      initialDelay: 5000,
-                    }
-                  );
-
-                  const result = await Promise.race([
-                    crawlPromise,
-                    new Promise((_, reject) =>
-                      setTimeout(
-                        () => reject(new Error("Crawl timeout")),
-                        300000
-                      )
-                    ),
-                  ]);
-
-                  console.log(
-                    `[Depth ${currentDepth}] Completed recursive crawl: ${normalizedLink}`
-                  );
-                  return result;
-                } catch (error) {
-                  console.error(
-                    `[Depth ${currentDepth}] Failed to crawl ${normalizedLink}:`,
-                    error instanceof Error ? error.message : error
-                  );
-                  failedLinks.add(normalizedLink);
-                  return [];
+          // Add timeout wrapper for entire batch
+          const batchPromise = Promise.all(
+            batch
+              .map((link) => {
+                if (link.startsWith("/")) {
+                  link = new URL(link, normalizedBaseUrl).toString();
                 }
-              });
-            }
-            return null;
-          })
-          .filter(Boolean);
-        console.log(`[Depth ${currentDepth}] Crawl promises:`, crawlPromises);
+                const normalizedLink = normalizeUrl(link);
 
-        // Update batch processing logging
-        console.log(`[Depth ${currentDepth}] Processing batch:`, {
-          baseUrl: base_url,
-          batchSize: batch.length,
-          totalProcessed: processedUrls.size,
-          remainingTotal: links.length - processedUrls.size,
-          currentDepth,
-          maxDepth: max_depth,
-          queueSize: crawlQueue.size,
-          pendingQueue: crawlQueue.pending,
-        });
+                // Skip if already processed
+                if (processedUrls.has(normalizedLink)) {
+                  console.log(
+                    `[Depth ${currentDepth}] Skipping already processed: ${normalizedLink}`
+                  );
+                  return null;
+                }
+                processedUrls.add(normalizedLink);
 
-        // Process each batch with Promise.allSettled
-        const results = await Promise.allSettled(crawlPromises);
+                if (
+                  normalizedLink.startsWith(normalizedBaseUrl) &&
+                  max_depth > 0 &&
+                  isValidUrl(normalizedLink)
+                ) {
+                  return crawlQueue.add(async () => {
+                    const singleCrawlPromise = withRetry(
+                      async () => {
+                        return crawl_website(
+                          normalizedLink,
+                          max_depth - 1,
+                          organization_id,
+                          currentDepth + 1
+                        );
+                      },
+                      {
+                        maxRetries: 2, // Reduced retries
+                        initialDelay: 2000,
+                      }
+                    );
 
-        // Log batch results
-        const successful = results.filter(
-          (r) => r.status === "fulfilled"
-        ).length;
-        const failed = results.filter((r) => r.status === "rejected").length;
-        console.log(`Completed processing batch for ${base_url}:`, {
-          successful,
-          failed,
-          batchSize: batch.length,
-          remainingLinks: links.length - processedUrls.size,
-        });
+                    // Add timeout for single URL crawl
+                    return Promise.race([
+                      singleCrawlPromise,
+                      new Promise((_, reject) =>
+                        setTimeout(
+                          () =>
+                            reject(
+                              new Error(`Timeout crawling ${normalizedLink}`)
+                            ),
+                          CRAWL_TIMEOUTS.SINGLE_URL_CRAWL
+                        )
+                      ),
+                    ]);
+                  });
+                }
+                return null;
+              })
+              .filter(Boolean)
+          );
 
-        // Add a small delay between batches to prevent overwhelming the system
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+          // Add timeout for entire batch
+          const results = (await Promise.race([
+            batchPromise,
+            new Promise((_, reject) =>
+              setTimeout(
+                () =>
+                  reject(
+                    new Error(
+                      `Timeout processing batch of ${batch.length} links`
+                    )
+                  ),
+                CRAWL_TIMEOUTS.BATCH_PROCESSING
+              )
+            ),
+          ])) as PromiseSettledResult<any>[];
+
+          // Log batch results
+          const successful = results.filter(
+            (r) => r.status === "fulfilled"
+          ).length;
+          const failed = results.filter((r) => r.status === "rejected").length;
+          console.log(`Completed processing batch for ${base_url}:`, {
+            successful,
+            failed,
+            batchSize: batch.length,
+            remainingLinks: links.length - processedUrls.size,
+          });
+
+          // Add a small delay between batches to prevent overwhelming the system
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        } catch (error) {
+          console.error(`[Depth ${currentDepth}] Batch processing error:`, {
+            error: error instanceof Error ? error.message : error,
+            currentDepth,
+            batchSize: batch.length,
+            queueSize: crawlQueue.size,
+          });
+          continue;
+        }
       }
     } catch (error: any) {
       console.error(`Failed to process ${base_url}:`, {
