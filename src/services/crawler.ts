@@ -90,7 +90,10 @@ export async function generateEmbeddingWithRetry(
   try {
     // Check cache first
     const cached = embeddingCache.get(text);
-    if (cached) return cached;
+    if (cached) {
+      console.log(`Embedding cache hit for: ${text}`);
+      return cached;
+    }
 
     const embeddingPromise = withRetry(async () => {
       const response = await openai.embeddings.create({
@@ -904,11 +907,12 @@ async function processDocument(
                 embeddings,
               ]
             );
+            console.log(`Inserted document single: ${normalizedUrl}`, res.rows);
             return res.rows.length > 0;
           });
         });
       });
-      console.log(`Processed document: ${normalizedUrl}`, result);
+      console.log(`Processed document single: ${normalizedUrl}`, result);
       return result === true;
     } else {
       // Multiple chunks case
@@ -956,13 +960,17 @@ async function processDocument(
                     url,
                   ]
                 );
+                console.log(
+                  `Inserted document chunk: ${normalizedUrl}`,
+                  res.rows
+                );
                 return res.rows.length > 0;
               });
             });
           })
         )
       );
-      console.log(`Processed document: ${normalizedUrl}`, results);
+      console.log(`Processed document chunks: ${normalizedUrl}`, results);
       return results.every(
         (result: any) => result.status === "fulfilled" && result.value !== null
       );
