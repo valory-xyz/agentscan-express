@@ -521,7 +521,7 @@ export async function crawl_website(
       );
 
       // Process links in smaller batches to prevent overwhelming the system
-      const BATCH_SIZE = 20;
+      const BATCH_SIZE = 10;
       const linkBatches = [];
       for (let i = 0; i < links.length; i += BATCH_SIZE) {
         linkBatches.push(links.slice(i, i + BATCH_SIZE));
