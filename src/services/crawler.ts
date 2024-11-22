@@ -374,7 +374,7 @@ async function getBrowser(): Promise<Browser> {
 
 // Update the scrape_website function
 async function scrape_website(url: string): Promise<ScrapedContent> {
-  let browser: Browser | null = null;
+  let browser: any = null;
   let context: any = null;
   let page: any = null;
 
