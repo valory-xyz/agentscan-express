@@ -990,12 +990,29 @@ async function processGithubRepo(
 
     console.log(`Processing GitHub repository: ${owner}/${repo}`);
 
-    // Get repository contents
-    const { data: contents } = await octokit.repos.getContent({
-      owner,
-      repo,
-      path: "",
-    });
+    // Get repository contents with rate limit handling
+    let contents;
+    try {
+      const { data } = await octokit.repos.getContent({
+        owner,
+        repo,
+        path: "",
+      });
+      contents = data;
+    } catch (error: any) {
+      if (error.status === 403) {
+        await handleGitHubRateLimit(error);
+        // Retry the initial content fetch after waiting
+        const { data } = await octokit.repos.getContent({
+          owner,
+          repo,
+          path: "",
+        });
+        contents = data;
+      } else {
+        throw error;
+      }
+    }
 
     const processFile = async (
       file: any,
