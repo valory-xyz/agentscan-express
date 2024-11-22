@@ -149,6 +149,7 @@ ${embedding.content}
       try {
         // Add a small random delay between chunks (between 75-125ms)
         await sleep(75 + Math.random() * 50);
+        console.log(`Writing chunk ${chunk}`);
         res.write(`${JSON.stringify({ content: chunk })}\n\n`);
       } catch (writeError) {
         console.error("Error writing chunk:", writeError);
