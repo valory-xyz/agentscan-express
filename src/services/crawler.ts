@@ -883,12 +883,6 @@ const octokit = new Octokit({
   auth: process.env.GITHUB_ACCESS_TOKEN, // You'll need to add this to your env variables
 });
 
-// Add these constants for GitHub processing
-const GITHUB_TIMEOUTS = {
-  REPO_PROCESSING: 300000, // 5 minutes for entire repo
-  FILE_PROCESSING: 30000, // 30 seconds per file
-};
-
 // Add supported file extensions
 const SUPPORTED_EXTENSIONS = [
   ".js",
@@ -1057,12 +1051,12 @@ async function processGithubRepo(
         } catch (error: any) {
           if (error.status === 403) {
             await handleGitHubRateLimit(error);
-            // Retry the same file after waiting
+
             return await processFile(file, path);
           }
           throw error;
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error(`Error processing file ${file.name}:`, error);
         return false;
       }
