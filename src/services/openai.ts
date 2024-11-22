@@ -142,11 +142,12 @@ Key points:
 - I MUST ONLY use the exact URLs provided after "LINK_URL:" in the context
 - Each reference includes a pre-formatted link showing exactly how to reference that component
 - Never create or modify URLs - copy them exactly as shown in "Available link:" sections
-- Never use parentheses with plain text - always convert to hyperlinks using the exact URLs provided
-- If I don't have a matching URL in the context references, mention the component without parentheses
+- Never use parentheses with plain text - always use proper markdown links with URLs from the context
+- If I don't have a matching URL in the context references, just mention the component name without links
 
-INCORRECT: Trading autonomously in DeFi (e.g., BabyDegen)
-CORRECT: Trading autonomously in DeFi (e.g., copy the exact [BabyDegen](URL) from the context)
+INCORRECT: Check out our tool (ServiceRegistry)
+CORRECT: Check out our [ServiceRegistry](https://olas.network/explore)
+CORRECT: Check out our ServiceRegistry
 
 IMPORTANT: Only use URLs that appear after "LINK_URL:" in the context. Never modify or create URLs.
 
