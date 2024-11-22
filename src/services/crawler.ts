@@ -685,6 +685,12 @@ export async function crawl_website(
   currentDepth: number = 0
 ) {
   try {
+    // Add early depth check
+    if (currentDepth >= max_depth) {
+      console.log(`Reached maximum depth (${max_depth}) for ${base_url}`);
+      return [];
+    }
+
     const normalizedBaseUrl = normalizeUrl(base_url);
     const baseUrlObj = new URL(normalizedBaseUrl);
 
@@ -824,18 +830,22 @@ export async function crawl_website(
                 if (
                   normalizedLink.includes(baseUrlObj.hostname) &&
                   !processedUrls.has(normalizedLink) &&
-                  max_depth > 0 &&
+                  currentDepth < max_depth &&
                   isValidUrl(normalizedLink)
                 ) {
                   processedUrls.add(normalizedLink);
-                  console.log(`Crawling new link: ${normalizedLink}`);
+                  console.log(
+                    `Crawling new link: ${normalizedLink} at depth ${
+                      currentDepth + 1
+                    }`
+                  );
 
                   return crawlQueue.add(async () => {
                     const singleCrawlPromise = withRetry(
                       async () => {
                         return crawl_website(
                           normalizedLink,
-                          max_depth - 1,
+                          max_depth,
                           organization_id,
                           currentDepth + 1
                         );
