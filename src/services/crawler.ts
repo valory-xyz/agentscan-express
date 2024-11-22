@@ -991,7 +991,10 @@ async function processGithubRepo(
       path: "",
     });
 
-    const processFile = async (file: any, path: string = "") => {
+    const processFile = async (
+      file: any,
+      path: string = ""
+    ): Promise<boolean> => {
       try {
         // Skip files with 'audits' in the name or path
         const fullPath = path ? `${path}/${file.name}` : file.name;
@@ -1062,7 +1065,7 @@ async function processGithubRepo(
       }
     };
 
-    const processDirectory = async (dirPath: string) => {
+    const processDirectory = async (dirPath: string): Promise<void> => {
       try {
         // Skip directories with 'audits' in the path
         if (dirPath.toLowerCase().includes("audits")) {
