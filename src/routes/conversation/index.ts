@@ -10,6 +10,11 @@ import openai from "../../initalizers/openai";
 const router = Router();
 
 router.post("/", async (req, res) => {
+  console.log(
+    "Starting conversation request with question:",
+    req.body.question
+  );
+
   const question = req.body.question;
   const messages = req.body.messages;
 
@@ -20,6 +25,7 @@ router.post("/", async (req, res) => {
   const decodedQuestion = decodeURIComponent(question as string);
 
   const questionEmbedding = await generateEmbeddingWithRetry(decodedQuestion);
+  console.log("Generated embedding for question");
 
   const codeEmbeddingsQuery = await pool.query(
     `SELECT 
@@ -33,6 +39,9 @@ router.post("/", async (req, res) => {
     ORDER BY similarity
     LIMIT 24`,
     [questionEmbedding, "olas"]
+  );
+  console.log(
+    `Retrieved ${codeEmbeddingsQuery.rows.length} initial embeddings`
   );
 
   const codeEmbeddings = codeEmbeddingsQuery.rows;
@@ -76,6 +85,10 @@ ${embedding.content}
   );
 
   const relevantEmbeddings = await Promise.all(filterPromises);
+  console.log(
+    "Relevance scores:",
+    relevantEmbeddings.map((e) => `${e.index}:${e.score}`).join(", ")
+  );
 
   // Sort by score and take top 30% or at least 3 results, whichever is greater
   const minResults = 6;
@@ -109,31 +122,60 @@ ${embedding.content}
     .sort((a: any, b: any) => b.similarity - a.similarity)
     .slice(0, 10);
 
-  console.log("Limited context:", limitedContext);
+  console.log(
+    `Selected ${relevantIndices.length} relevant contexts after filtering`
+  );
+  console.log(`Final limited context count: ${limitedContext.length}`);
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
+  console.log("Headers set, beginning streaming response");
 
   try {
+    let chunkCount = 0;
     for await (const chunk of generateChatResponseWithRetry(
       limitedContext,
       messages
     )) {
-      // Add a random delay between 75-125ms to simulate human-like typing
-      await new Promise((resolve) =>
-        setTimeout(resolve, Math.random() * 50 + 75)
-      );
-      res.write(`${JSON.stringify({ content: chunk })}\n\n`);
-    }
-    console.log("Done streaming");
+      chunkCount++;
+      if (chunkCount % 50 === 0) {
+        console.log(`Streamed ${chunkCount} chunks so far`);
+      }
 
-    res.write(`${JSON.stringify({ done: true })}\n\n`);
+      try {
+        res.write(`${JSON.stringify({ content: chunk })}\n\n`);
+      } catch (writeError) {
+        console.error("Error writing chunk:", writeError);
+        throw writeError;
+      }
+    }
+    console.log(
+      `Streaming completed successfully. Total chunks: ${chunkCount}`
+    );
+
+    try {
+      res.write(`${JSON.stringify({ done: true })}\n\n`);
+      console.log("Wrote completion message");
+    } catch (finalWriteError) {
+      console.error("Error writing completion message:", finalWriteError);
+      throw finalWriteError;
+    }
   } catch (error) {
     console.error("Streaming error:", error);
-    res.write(`${JSON.stringify({ error: "Streaming failed" })}\n\n`);
+    try {
+      res.write(`${JSON.stringify({ error: "Streaming failed" })}\n\n`);
+      console.log("Wrote error message");
+    } catch (errorWriteError) {
+      console.error("Error writing error message:", errorWriteError);
+    }
   } finally {
-    res.end();
+    try {
+      res.end();
+      console.log("Response ended successfully");
+    } catch (endError) {
+      console.error("Error ending response:", endError);
+    }
   }
 });
 
