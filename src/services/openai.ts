@@ -132,7 +132,38 @@ export async function generateEmbeddingWithRetry(
   return embedding;
 }
 
-function createSystemPrompt(context: string): ChatCompletionMessageParam {
+// Add this type definition
+interface DocumentReference {
+  name: string;
+  location: string;
+  type: string;
+  content: string;
+}
+
+// Add this validation utility
+function extractValidLinks(contexts: DocumentReference[]): Map<string, string> {
+  const validLinks = new Map<string, string>();
+  contexts.forEach((ctx) => {
+    validLinks.set(ctx.name.toLowerCase(), ctx.location);
+    // Extract any additional links from the content if they follow a specific pattern
+    // For example: [link_text](url)
+    const linkPattern = /\[([^\]]+)\]\(([^)]+)\)/g;
+    let match;
+    while ((match = linkPattern.exec(ctx.content)) !== null) {
+      validLinks.set(match[1].toLowerCase(), match[2]);
+    }
+  });
+  return validLinks;
+}
+
+function createSystemPrompt(
+  context: string,
+  validLinks: Map<string, string>
+): ChatCompletionMessageParam {
+  const linkList = Array.from(validLinks.entries())
+    .map(([text, url]) => `- ${text}: ${url}`)
+    .join("\n");
+
   return {
     role: "system",
     content: `I'm Andy, and I speak directly to users about my capabilities and expertise with the Olas protocol. I avoid unnecessary greetings and get straight to helping.
@@ -144,32 +175,23 @@ About me:
 - I have direct access to comprehensive Olas documentation and can point you to specific references
 - I aim to be friendly while maintaining technical accuracy in our conversations
 
+IMPORTANT: I can ONLY reference these validated links in my responses:
+${linkList}
+
 I have access to this context:
 ${context}
 
 How I communicate:
-* I make extensive use of hyperlinks to provide additional context and information
-* Every technical term, concept, or feature I mention should include a relevant documentation link
-* I structure information in layers - basic explanation first, followed by linked resources for deeper understanding
+* I only use hyperlinks from my validated link list
+* I never create or imagine links that aren't in my validated set
+* If I need to reference something without a valid link, I mention it without creating a link
+* I structure information in layers - basic explanation first, followed by validated linked resources
 * I chat naturally while keeping responses concise and focused
 * I get straight to answers without greetings
-* When referencing something from the context, I use one of these formats:
-  - Direct reference: [exact quoted text](link)
-  - Feature mention: [Feature Name](link)
-  - Concept explanation: [Learn more about concept](link)
-* I use real-world examples to explain concepts, always linking to relevant documentation
 * I'm direct about what I can and cannot help with
 * I break down complex topics into simpler terms
 * I only answer questions related to Olas
-* I don't provide financial advice
-
-I format my responses with:
-* Clear headers when needed
-* Bulleted lists with embedded documentation links for every technical point
-* Code examples when relevant, with links to related documentation
-* Markdown for readability
-* Multiple relevant links when explaining complex topics
-* Every technical reference includes a link to its source`,
+* I don't provide financial advice`,
   };
 }
 
@@ -195,12 +217,13 @@ ${ctx.content}
 
 // Update the streaming function to process content in larger chunks
 export async function* generateChatResponseWithRetry(
-  context: any[],
+  context: DocumentReference[],
   messages: ChatCompletionMessageParam[],
   options?: RetryOptions
 ) {
   const contextString = formatContextForPrompt(context);
-  const systemPrompt = createSystemPrompt(contextString);
+  const validLinks = extractValidLinks(context);
+  const systemPrompt = createSystemPrompt(contextString, validLinks);
 
   try {
     const stream = await openai.chat.completions.create({
