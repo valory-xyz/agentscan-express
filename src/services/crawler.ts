@@ -348,11 +348,38 @@ async function filter_pdf_content(raw_text: string) {
   }
 }
 
-// Modify the scrape_website function to handle PDFs
-async function scrape_website(url: string): Promise<ScrapedContent> {
-  let browser: any = null;
+// Add this new browser management utility
+let browserInstance: Browser | null = null;
+async function getBrowser(): Promise<Browser> {
   try {
-    // Handle PDF case (no changes needed here)
+    if (!browserInstance) {
+      const launchOptions = {
+        headless: true,
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-gpu",
+          "--single-process",
+        ],
+      };
+      browserInstance = await chromium.launch(launchOptions);
+    }
+    return browserInstance;
+  } catch (error) {
+    console.error("Failed to launch browser:", error);
+    throw error;
+  }
+}
+
+// Update the scrape_website function
+async function scrape_website(url: string): Promise<ScrapedContent> {
+  let browser: Browser | null = null;
+  let context: any = null;
+  let page: any = null;
+
+  try {
+    // Handle PDF case first
     if (
       url.toLowerCase().endsWith(".pdf") ||
       url.toLowerCase().includes("/pdf/")
@@ -370,18 +397,27 @@ async function scrape_website(url: string): Promise<ScrapedContent> {
       async () => {
         try {
           console.log(`Starting scrape for ${url}`);
-          const launchOptions = {
+          // Launch a new browser instance for each scrape
+          browser = await chromium.launch({
             headless: true,
-            args: ["--no-sandbox", "--disable-setuid-sandbox"],
-          };
+            args: [
+              "--no-sandbox",
+              "--disable-setuid-sandbox",
+              "--disable-dev-shm-usage",
+              "--disable-gpu",
+              "--single-process",
+            ],
+          });
 
-          console.log(`Attempting to launch browser for ${url}`);
-          browser = await chromium.launch(launchOptions);
-          console.log(`Browser launched successfully for ${url}`);
+          context = await browser.newContext({
+            userAgent:
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+          });
 
-          const context = await browser.newContext();
-          const page = await context.newPage();
-          console.log(`New page created for ${url}`);
+          page = await context.newPage();
+
+          await page.setDefaultTimeout(TIMEOUTS.PAGE_LOAD);
+          await page.setDefaultNavigationTimeout(TIMEOUTS.PAGE_LOAD);
 
           console.log(`Navigating to ${url}`);
           await page.goto(url, {
@@ -389,31 +425,24 @@ async function scrape_website(url: string): Promise<ScrapedContent> {
             timeout: TIMEOUTS.PAGE_LOAD,
           });
 
-          // Add timeout for content scraping
-          const contentPromise = page.evaluate(() => {
-            const links = Array.from(document.querySelectorAll("a"))
-              .map((link) => link.href)
-              .filter((href) => href && !href.startsWith("javascript:"));
-
-            const uniqueLinks = [...new Set(links)];
-            console.log(`Found ${uniqueLinks.length} links`);
-
-            return {
-              bodyText: document.body.innerText,
-              links: uniqueLinks,
-            };
-          });
-
-          const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(
-              () => reject(new Error("Content scraping timeout")),
-              TIMEOUTS.SCRAPE_OPERATION
-            )
-          );
-
           const content = (await Promise.race([
-            contentPromise,
-            timeoutPromise,
+            page.evaluate(() => {
+              const links = Array.from(document.querySelectorAll("a"))
+                .map((link) => link.href)
+                .filter((href) => href && !href.startsWith("javascript:"));
+
+              const uniqueLinks = [...new Set(links)];
+              return {
+                bodyText: document.body.innerText,
+                links: uniqueLinks,
+              };
+            }),
+            new Promise((_, reject) =>
+              setTimeout(
+                () => reject(new Error("Content scraping timeout")),
+                TIMEOUTS.SCRAPE_OPERATION
+              )
+            ),
           ])) as ScrapedContent;
 
           content.links = content.links
@@ -427,16 +456,10 @@ async function scrape_website(url: string): Promise<ScrapedContent> {
 
           return content;
         } finally {
-          // Ensure cleanup happens in all cases
-          if (browser) {
-            await browser.close().catch((err: Error) => {
-              console.error(
-                "Error while closing browser in error handler:",
-                err
-              );
-            });
-            browser = null;
-          }
+          // Ensure proper cleanup of resources
+          if (page) await page.close().catch(console.error);
+          if (context) await context.close().catch(console.error);
+          if (browser) await browser.close().catch(console.error);
         }
       },
       {
@@ -446,13 +469,28 @@ async function scrape_website(url: string): Promise<ScrapedContent> {
     );
   } catch (error) {
     console.error("Fatal error in scrape_website:", error);
-    // Ensure browser is closed even if the retry mechanism fails
-    if (browser) {
-      await browser.close().catch((err: Error) => {
-        console.error("Error while closing browser in error handler:", err);
-      });
+    // Ensure cleanup even on error
+    try {
+      if (page) await page.close().catch(console.error);
+      if (context) await context.close().catch(console.error);
+      if (browser) await browser.close().catch(console.error);
+    } catch (cleanupError) {
+      console.error("Error during cleanup:", cleanupError);
     }
     return { bodyText: "", links: [] };
+  }
+}
+
+// Add cleanup function for the browser instance
+export async function cleanupBrowser(): Promise<void> {
+  if (browserInstance) {
+    try {
+      await browserInstance.close();
+    } catch (error) {
+      console.error("Error closing browser:", error);
+    } finally {
+      browserInstance = null;
+    }
   }
 }
 
