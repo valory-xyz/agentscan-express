@@ -9,6 +9,9 @@ import openai from "../../initalizers/openai";
 
 const router = Router();
 
+// Add this helper function before the router.post
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 router.post("/", async (req, res) => {
   console.log(
     "Starting conversation request with question:",
@@ -144,6 +147,8 @@ ${embedding.content}
       }
 
       try {
+        // Add a small random delay between chunks (between 75-125ms)
+        await sleep(75 + Math.random() * 50);
         res.write(`${JSON.stringify({ content: chunk })}\n\n`);
       } catch (writeError) {
         console.error("Error writing chunk:", writeError);
