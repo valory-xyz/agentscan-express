@@ -126,6 +126,7 @@ ${embedding.content}
       );
       res.write(`${JSON.stringify({ content: chunk })}\n\n`);
     }
+    console.log("Done streaming");
 
     res.write(`${JSON.stringify({ done: true })}\n\n`);
   } catch (error) {
