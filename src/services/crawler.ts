@@ -469,7 +469,8 @@ async function getYoutubeVideoInfo(
 
 // Update the transcribeYoutubeVideo function to use filter_youtube_content
 async function transcribeYoutubeVideo(
-  url: string
+  url: string,
+  organization_id: string
 ): Promise<{ transcript: string; title: string | null }> {
   try {
     const { videoId, title } = await getYoutubeVideoInfo(url);
@@ -538,7 +539,7 @@ async function transcribeYoutubeVideo(
     );
 
     return { transcript: formattedTranscript, title };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error transcribing YouTube video:", error);
 
     // Update status to failed
@@ -556,7 +557,10 @@ async function transcribeYoutubeVideo(
 }
 
 // Update the scrape_website function's YouTube handling section
-async function scrape_website(url: string): Promise<ScrapedContent> {
+async function scrape_website(
+  url: string,
+  organization_id: string
+): Promise<ScrapedContent> {
   let browser: any = null;
   let context: any = null;
   let page: any = null;
@@ -565,7 +569,10 @@ async function scrape_website(url: string): Promise<ScrapedContent> {
     // Handle YouTube case first
     if (url.includes("youtube.com/watch?v=") || url.includes("youtu.be/")) {
       console.log(`Detected YouTube URL: ${url}`);
-      const { transcript, title } = await transcribeYoutubeVideo(url);
+      const { transcript, title } = await transcribeYoutubeVideo(
+        url,
+        organization_id
+      );
       return {
         bodyText: transcript,
         links: [],
@@ -1112,7 +1119,7 @@ async function processGithubRepo(
     );
 
     return true;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error processing GitHub repository:", error);
 
     // Update status to failed
@@ -1209,7 +1216,10 @@ export async function crawl_website(
       );
 
       console.log(`Starting scrape for ${base_url}`);
-      const { bodyText, links, title } = await scrape_website(base_url);
+      const { bodyText, links, title } = await scrape_website(
+        base_url,
+        organization_id
+      );
       console.log(
         `Scraped content for ${base_url}, content length: ${bodyText.length}`
       );
