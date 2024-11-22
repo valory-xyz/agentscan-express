@@ -910,6 +910,36 @@ const SUPPORTED_EXTENSIONS = [
   ".rs",
 ];
 
+// Update these constants for GitHub rate limiting
+const GITHUB_RATE_LIMIT = {
+  WAIT_BUFFER: 3000000, // 50 minutes buffer after reset time
+  MAX_WAIT_TIME: 7200000, // 2 hours maximum wait time
+};
+
+// Add this helper function to handle rate limit waiting
+async function handleGitHubRateLimit(error: any): Promise<void> {
+  if (error.status === 403 && error.response?.headers?.["x-ratelimit-reset"]) {
+    const resetTime =
+      parseInt(error.response.headers["x-ratelimit-reset"]) * 1000; // Convert to milliseconds
+    const now = Date.now();
+    const waitTime = Math.min(
+      resetTime - now + GITHUB_RATE_LIMIT.WAIT_BUFFER,
+      GITHUB_RATE_LIMIT.MAX_WAIT_TIME
+    );
+
+    if (waitTime > 0) {
+      console.log(
+        `GitHub rate limit hit. Waiting ${
+          waitTime / 1000
+        } seconds until ${new Date(resetTime).toISOString()}`
+      );
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
+      return;
+    }
+  }
+  throw error; // Re-throw if not a rate limit error or invalid reset time
+}
+
 // Update GitHub repository processing function
 async function processGithubRepo(
   repoUrl: string,
@@ -977,42 +1007,54 @@ async function processGithubRepo(
           return true;
         }
 
-        const { data } = await octokit.repos.getContent({
-          owner,
-          repo,
-          path: path ? `${path}/${file.name}` : file.name,
-        });
+        try {
+          const { data } = await octokit.repos.getContent({
+            owner,
+            repo,
+            path: path ? `${path}/${file.name}` : file.name,
+          });
 
-        // Type check and access content safely
-        if (!("content" in data) || typeof data.content !== "string") {
-          throw new Error("Invalid file content response");
-        }
-
-        const fileUrl = `${repoUrl}/blob/main/${path}/${file.name}`;
-
-        // Handle PDF files differently
-        if (file.name.toLowerCase().endsWith(".pdf")) {
-          // Get raw PDF URL
-          const rawPdfUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/${path}/${file.name}`;
-          console.log(`Processing PDF file from GitHub: ${rawPdfUrl}`);
-
-          try {
-            const pdfText = await downloadAndProcessPdf(rawPdfUrl);
-            const filteredContent = await filter_pdf_content(pdfText);
-            return await processDocument(
-              fileUrl,
-              filteredContent || pdfText,
-              organization_id
-            );
-          } catch (pdfError) {
-            console.error(`Error processing PDF file ${file.name}:`, pdfError);
-            return false;
+          // Type check and access content safely
+          if (!("content" in data) || typeof data.content !== "string") {
+            throw new Error("Invalid file content response");
           }
-        }
 
-        // Process non-PDF files
-        const content = base64.decode(data.content);
-        return await processDocument(fileUrl, content, organization_id);
+          const fileUrl = `${repoUrl}/blob/main/${path}/${file.name}`;
+
+          // Handle PDF files differently
+          if (file.name.toLowerCase().endsWith(".pdf")) {
+            // Get raw PDF URL
+            const rawPdfUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/${path}/${file.name}`;
+            console.log(`Processing PDF file from GitHub: ${rawPdfUrl}`);
+
+            try {
+              const pdfText = await downloadAndProcessPdf(rawPdfUrl);
+              const filteredContent = await filter_pdf_content(pdfText);
+              return await processDocument(
+                fileUrl,
+                filteredContent || pdfText,
+                organization_id
+              );
+            } catch (pdfError) {
+              console.error(
+                `Error processing PDF file ${file.name}:`,
+                pdfError
+              );
+              return false;
+            }
+          }
+
+          // Process non-PDF files
+          const content = base64.decode(data.content);
+          return await processDocument(fileUrl, content, organization_id);
+        } catch (error: any) {
+          if (error.status === 403) {
+            await handleGitHubRateLimit(error);
+            // Retry the same file after waiting
+            return await processFile(file, path);
+          }
+          throw error;
+        }
       } catch (error) {
         console.error(`Error processing file ${file.name}:`, error);
         return false;
@@ -1042,8 +1084,13 @@ async function processGithubRepo(
             await processDirectory(`${dirPath}/${item.name}`);
           }
         }
-      } catch (error) {
-        console.error(`Error processing directory ${dirPath}:`, error);
+      } catch (error: any) {
+        if (error.status === 403) {
+          await handleGitHubRateLimit(error);
+          // Retry the same directory after waiting
+          return processDirectory(dirPath);
+        }
+        throw error;
       }
     };
 
