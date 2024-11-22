@@ -921,25 +921,29 @@ const GITHUB_RATE_LIMIT = {
   MAX_WAIT_TIME: 7200000, // 2 hours maximum wait time
 };
 
-// Add this helper function to handle rate limit waiting
+// Update the GitHub rate limit handling function
 async function handleGitHubRateLimit(error: any): Promise<void> {
   if (error.status === 403 && error.response?.headers?.["x-ratelimit-reset"]) {
-    const resetTime =
-      parseInt(error.response.headers["x-ratelimit-reset"]) * 1000; // Convert to milliseconds
-    const now = Date.now();
-    const waitTime = Math.min(
-      resetTime - now + GITHUB_RATE_LIMIT.WAIT_BUFFER,
-      GITHUB_RATE_LIMIT.MAX_WAIT_TIME
+    const resetTimeSeconds = parseInt(
+      error.response.headers["x-ratelimit-reset"]
     );
-
-    if (waitTime > 0) {
-      console.log(
-        `GitHub rate limit hit. Waiting ${
-          waitTime / 1000
-        } seconds until ${new Date(resetTime).toISOString()}`
+    if (!isNaN(resetTimeSeconds)) {
+      const resetTimeMs = resetTimeSeconds * 1000; // Convert seconds to milliseconds
+      const now = Date.now();
+      const waitTime = Math.min(
+        resetTimeMs - now + GITHUB_RATE_LIMIT.WAIT_BUFFER,
+        GITHUB_RATE_LIMIT.MAX_WAIT_TIME
       );
-      await new Promise((resolve) => setTimeout(resolve, waitTime));
-      return;
+
+      if (waitTime > 0) {
+        console.log(
+          `GitHub rate limit hit. Waiting ${Math.round(
+            waitTime / 1000
+          )} seconds until ${new Date(resetTimeMs).toISOString()}`
+        );
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+        return;
+      }
     }
   }
   throw error; // Re-throw if not a rate limit error or invalid reset time
