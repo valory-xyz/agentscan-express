@@ -3,13 +3,18 @@ import { toSql } from "pgvector";
 import PQueue from "p-queue";
 import * as crypto from "crypto";
 import openai from "../initalizers/openai";
-import { MAX_TOKENS, splitTextIntoChunks } from "./openai";
+import { estimateTokens, MAX_TOKENS, splitTextIntoChunks } from "./openai";
 import { executeQuery, safeQueueOperation } from "./postgres";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import fetch from "node-fetch";
 import pdf from "pdf-parse";
+import { Octokit } from "@octokit/rest";
+import * as base64 from "base-64";
+import pgvector from "pgvector";
+import { YoutubeTranscript } from "youtube-transcript";
+import { google } from "googleapis";
 
 // Simplify the status enum
 enum ProcessingStatus {
@@ -83,43 +88,76 @@ export async function withRetry<T>(
 // Cache for embeddings
 const embeddingCache = new Map<string, number[]>();
 
+// Modified generateEmbeddingWithRetry function
 export async function generateEmbeddingWithRetry(
   text: string,
-  options?: RetryOptions
-): Promise<number[]> {
-  try {
-    // Check cache first
-    const cached = embeddingCache.get(text);
-    if (cached) {
-      console.log(`Embedding cache hit for: ${text}`);
-      return cached;
-    }
+  maxRetries: number = 3,
+  initialDelay: number = 200
+): Promise<any> {
+  const estimatedTokens = estimateTokens(text);
 
-    const embeddingPromise = withRetry(async () => {
-      const response = await openai.embeddings.create({
+  // If text is within token limit, proceed normally
+  if (estimatedTokens <= MAX_TOKENS) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const cleanedText = text.replace(/[\r\n]/g, " ");
+        const embeddingResponse = await openai.embeddings.create({
+          model: "text-embedding-3-small",
+          input: cleanedText,
+          dimensions: 512,
+        });
+
+        return pgvector.toSql(embeddingResponse.data?.[0]?.embedding);
+      } catch (error: any) {
+        // If we hit the token limit, break out of retry loop and handle splitting
+        if (
+          error.status === 400 &&
+          error.message?.includes("maximum context length")
+        ) {
+          break;
+        }
+
+        if (attempt === maxRetries) {
+          console.error(
+            "Failed all retry attempts for embedding generation:",
+            error
+          );
+          throw error;
+        }
+
+        const delay =
+          initialDelay * Math.pow(1.5, attempt - 1) + Math.random() * 100;
+        console.log(
+          `Embedding generation attempt ${attempt} failed. Retrying in ${delay}ms...`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  // Split text into chunks
+  console.log("Text too long for single embedding, splitting into chunks...");
+  const chunks = splitTextIntoChunks(text, MAX_TOKENS);
+
+  // Process each chunk
+  const embeddings: any[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    console.log(`Processing chunk ${i + 1}/${chunks.length}`);
+    try {
+      const embeddingResponse = await openai.embeddings.create({
         model: "text-embedding-3-small",
-        input: text,
+        input: chunks[i] as string,
         dimensions: 512,
       });
-      return toSql(response.data?.[0]?.embedding);
-    }, options);
 
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(
-        () => reject(new Error("Embedding generation timeout")),
-        TIMEOUTS.EMBEDDING_GENERATION
-      )
-    );
-
-    const embedding = await Promise.race([embeddingPromise, timeoutPromise]);
-
-    // Cache the result
-    embeddingCache.set(text, embedding);
-    return embedding;
-  } catch (error) {
-    console.error("Fatal error in generateEmbeddingWithRetry:", error);
-    return []; // Return empty embedding instead of crashing
+      embeddings.push(pgvector.toSql(embeddingResponse.data?.[0]?.embedding));
+    } catch (error) {
+      console.error(`Failed to generate embedding for chunk ${i + 1}:`, error);
+      throw error;
+    }
   }
+
+  return embeddings;
 }
 
 // Add this utility function near the top of the file
@@ -144,6 +182,7 @@ function normalizeUrl(url: string): string {
 interface ScrapedContent {
   bodyText: string;
   links: string[];
+  title?: string;
 }
 
 // Add interface near top of file
@@ -260,6 +299,20 @@ function isValidUrl(url: string): boolean {
       return false;
     }
 
+    // Add GitHub repository detection
+    if (
+      url.startsWith("https://github.com/") &&
+      url.split("/").length >= 3 &&
+      !url.includes("/blob/")
+    ) {
+      return true;
+    }
+
+    // Add YouTube URL detection
+    if (url.includes("youtube.com/watch?v=") || url.includes("youtu.be/")) {
+      return true;
+    }
+
     return true;
   } catch (error) {
     return false;
@@ -372,13 +425,107 @@ async function getBrowser(): Promise<Browser> {
   }
 }
 
-// Update the scrape_website function
+// Add this constant near other constants
+const youtube = google.youtube({
+  version: "v3",
+  auth: process.env.YOUTUBE_API_KEY, // You'll need to add this to your env variables
+});
+
+// Update the getYoutubeVideoId function to also fetch the title
+async function getYoutubeVideoInfo(
+  url: string
+): Promise<{ videoId: string | null; title: string | null }> {
+  try {
+    const urlObj = new URL(url);
+    let videoId = null;
+
+    if (urlObj.hostname.includes("youtube.com")) {
+      videoId = urlObj.searchParams.get("v");
+    } else if (urlObj.hostname === "youtu.be") {
+      videoId = urlObj.pathname.slice(1);
+    }
+
+    if (!videoId) {
+      return { videoId: null, title: null };
+    }
+
+    // Fetch video title using YouTube Data API
+    try {
+      const response = await youtube.videos.list({
+        part: ["snippet"],
+        id: [videoId],
+      });
+
+      const title = response.data.items?.[0]?.snippet?.title || null;
+      return { videoId, title };
+    } catch (error) {
+      console.error("Error fetching video title:", error);
+      return { videoId, title: null };
+    }
+  } catch {
+    return { videoId: null, title: null };
+  }
+}
+
+// Update the transcribeYoutubeVideo function to use filter_youtube_content
+async function transcribeYoutubeVideo(
+  url: string
+): Promise<{ transcript: string; title: string | null }> {
+  try {
+    const { videoId, title } = await getYoutubeVideoInfo(url);
+    if (!videoId) {
+      throw new Error("Invalid YouTube URL");
+    }
+
+    console.log(
+      `Transcribing YouTube video: ${videoId} - ${title || "Unknown Title"}`
+    );
+    const transcript = await YoutubeTranscript.fetchTranscript(videoId);
+
+    // Combine all transcript parts into a single text
+    const fullText = transcript
+      .map((part) => part.text)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (!fullText || fullText.length < 50) {
+      throw new Error("Transcript too short or empty");
+    }
+
+    // Filter the content using the specialized YouTube filter
+    const filteredContent = await filter_youtube_content(fullText);
+
+    // Format the transcript with the title
+    const formattedTranscript = title
+      ? `Title: ${title}\n${filteredContent || fullText}`
+      : filteredContent || fullText;
+
+    return { transcript: formattedTranscript, title };
+  } catch (error) {
+    console.error("Error transcribing YouTube video:", error);
+    throw error;
+  }
+}
+
+// Update the scrape_website function's YouTube handling section
 async function scrape_website(url: string): Promise<ScrapedContent> {
   let browser: any = null;
   let context: any = null;
   let page: any = null;
 
   try {
+    // Handle YouTube case first
+    if (url.includes("youtube.com/watch?v=") || url.includes("youtu.be/")) {
+      console.log(`Detected YouTube URL: ${url}`);
+      const { transcript, title } = await transcribeYoutubeVideo(url);
+      return {
+        bodyText: transcript,
+        links: [],
+        title: title || url,
+      };
+    }
+
     // Handle PDF case first
     if (
       url.toLowerCase().endsWith(".pdf") ||
@@ -677,7 +824,169 @@ async function updateProcessingStatus(
 // Add this near the top with other constants
 const processedUrlsCache = new Set<string>();
 
-// Update the crawl_website function to use the validation
+// Add GitHub API configuration
+const octokit = new Octokit({
+  auth: process.env.GITHUB_ACCESS_TOKEN, // You'll need to add this to your env variables
+});
+
+// Add these constants for GitHub processing
+const GITHUB_TIMEOUTS = {
+  REPO_PROCESSING: 300000, // 5 minutes for entire repo
+  FILE_PROCESSING: 30000, // 30 seconds per file
+};
+
+// Add supported file extensions
+const SUPPORTED_EXTENSIONS = [
+  ".js",
+  ".jsx",
+  ".ts",
+  ".tsx",
+  ".py",
+  ".rb",
+  ".java",
+  ".go",
+  ".cpp",
+  ".c",
+  ".h",
+  ".cs",
+  ".php",
+  ".swift",
+  ".kt",
+  ".rs",
+  ".md",
+  ".txt",
+  ".json",
+  ".yaml",
+  ".yml",
+  ".sol",
+  ".pdf",
+  ".rs",
+];
+
+// Update GitHub repository processing function
+async function processGithubRepo(
+  repoUrl: string,
+  organization_id: string
+): Promise<boolean> {
+  try {
+    // Extract owner and repo from GitHub URL
+    const urlParts = repoUrl.replace("https://github.com/", "").split("/");
+    const owner = urlParts[0];
+    const repo = urlParts[1];
+
+    console.log(`Processing GitHub repository: ${owner}/${repo}`);
+
+    // Get repository contents
+    const { data: contents } = await octokit.repos.getContent({
+      owner,
+      repo,
+      path: "",
+    });
+
+    const processFile = async (file: any, path: string = "") => {
+      try {
+        // Skip files with 'audits' in the name or path
+        const fullPath = path ? `${path}/${file.name}` : file.name;
+        if (fullPath.toLowerCase().includes("audits")) {
+          console.log(`Skipping audit-related file: ${fullPath}`);
+          return true;
+        }
+
+        if (
+          !SUPPORTED_EXTENSIONS.some((ext) =>
+            file.name.toLowerCase().endsWith(ext)
+          )
+        ) {
+          return true;
+        }
+
+        const { data } = await octokit.repos.getContent({
+          owner,
+          repo,
+          path: path ? `${path}/${file.name}` : file.name,
+        });
+
+        // Type check and access content safely
+        if (!("content" in data) || typeof data.content !== "string") {
+          throw new Error("Invalid file content response");
+        }
+
+        const fileUrl = `${repoUrl}/blob/main/${path}/${file.name}`;
+
+        // Handle PDF files differently
+        if (file.name.toLowerCase().endsWith(".pdf")) {
+          // Get raw PDF URL
+          const rawPdfUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/${path}/${file.name}`;
+          console.log(`Processing PDF file from GitHub: ${rawPdfUrl}`);
+
+          try {
+            const pdfText = await downloadAndProcessPdf(rawPdfUrl);
+            const filteredContent = await filter_pdf_content(pdfText);
+            return await processDocument(
+              fileUrl,
+              filteredContent || pdfText,
+              organization_id
+            );
+          } catch (pdfError) {
+            console.error(`Error processing PDF file ${file.name}:`, pdfError);
+            return false;
+          }
+        }
+
+        // Process non-PDF files
+        const content = base64.decode(data.content);
+        return await processDocument(fileUrl, content, organization_id);
+      } catch (error) {
+        console.error(`Error processing file ${file.name}:`, error);
+        return false;
+      }
+    };
+
+    const processDirectory = async (dirPath: string) => {
+      try {
+        // Skip directories with 'audits' in the path
+        if (dirPath.toLowerCase().includes("audits")) {
+          console.log(`Skipping audit-related directory: ${dirPath}`);
+          return;
+        }
+
+        const { data: dirContents } = await octokit.repos.getContent({
+          owner,
+          repo,
+          path: dirPath,
+        });
+
+        for (const item of Array.isArray(dirContents)
+          ? dirContents
+          : [dirContents]) {
+          if (item.type === "file") {
+            await processFile(item, dirPath);
+          } else if (item.type === "dir") {
+            await processDirectory(`${dirPath}/${item.name}`);
+          }
+        }
+      } catch (error) {
+        console.error(`Error processing directory ${dirPath}:`, error);
+      }
+    };
+
+    // Process all contents
+    for (const item of Array.isArray(contents) ? contents : [contents]) {
+      if (item.type === "file") {
+        await processFile(item);
+      } else if (item.type === "dir") {
+        await processDirectory(item.name);
+      }
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Error processing GitHub repository:", error);
+    return false;
+  }
+}
+
+// Update crawl_website to handle GitHub repositories
 export async function crawl_website(
   base_url: string,
   max_depth: number = 7,
@@ -685,6 +994,17 @@ export async function crawl_website(
   currentDepth: number = 0
 ) {
   try {
+    // Add GitHub repository handling
+    if (
+      base_url.startsWith("https://github.com/") &&
+      base_url.split("/").length >= 3 &&
+      !base_url.includes("/blob/")
+    ) {
+      console.log("Processing GitHub repository:", base_url);
+      await processGithubRepo(base_url, organization_id);
+      return [];
+    }
+
     // Add early depth check
     if (currentDepth >= max_depth) {
       console.log(`Reached maximum depth (${max_depth}) for ${base_url}`);
@@ -746,7 +1066,7 @@ export async function crawl_website(
       );
 
       console.log(`Starting scrape for ${base_url}`);
-      const { bodyText, links } = await scrape_website(base_url);
+      const { bodyText, links, title } = await scrape_website(base_url);
       console.log(
         `Scraped content for ${base_url}, content length: ${bodyText.length}`
       );
@@ -769,7 +1089,8 @@ export async function crawl_website(
           const success = await processDocument(
             base_url,
             filtered_content,
-            organization_id
+            organization_id,
+            title
           );
           console.log(
             `Document processing ${
@@ -800,6 +1121,12 @@ export async function crawl_website(
       console.log(
         `Processing ${links.length} links from ${base_url} (depth: ${max_depth})`
       );
+
+      // Add early return if no links to process
+      if (links.length === 0) {
+        console.log(`No links to process for ${base_url}, returning early`);
+        return [];
+      }
 
       // Create batches of links
       const BATCH_SIZE = 8;
@@ -937,24 +1264,49 @@ export async function crawl_website(
   }
 }
 
-// Update processDocument function to use normalized URL
+// Update processDocument function to simplify YouTube content structure
 async function processDocument(
   url: string,
   cleanedCodeContent: string,
-  organization_id: string
+  organization_id: string,
+  title?: string
 ): Promise<boolean> {
   try {
     const normalizedUrl = normalizeUrl(url);
     console.log(`Processing document: ${normalizedUrl}`);
-    const cleaned_content = cleanedCodeContent.replace(/\n/g, "");
     const hash = crypto
       .createHash("sha256")
       .update(normalizedUrl)
       .digest("hex");
+
+    // Determine the type based on the URL
+    const type =
+      url.includes("youtube.com") || url.includes("youtu.be")
+        ? "video"
+        : url.includes("github.com")
+        ? "code"
+        : "document";
+
+    // For YouTube videos, format content with title prefix
+    const cleaned_content =
+      type === "video" && title
+        ? `title: ${title}\n${cleanedCodeContent}`.replace(/\n/g, " ").trim()
+        : cleanedCodeContent.replace(/\n/g, " ").trim();
+
+    // Get embeddings and ensure they're properly formatted
     const embeddings = await generateEmbeddingWithRetry(cleaned_content);
 
     if (!Array.isArray(embeddings) || embeddings.length === 1) {
       // Single embedding case
+      const formattedEmbedding = Array.isArray(embeddings)
+        ? embeddings[0]
+        : embeddings;
+
+      if (!formattedEmbedding || typeof formattedEmbedding !== "string") {
+        console.error("Invalid embedding format:", formattedEmbedding);
+        return false;
+      }
+
       const result = await safeQueueOperation(async () => {
         return await dbQueue.add(async () => {
           return await executeQuery(async (client) => {
@@ -969,28 +1321,28 @@ async function processDocument(
                 embedding,
                 created_at,
                 updated_at
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7::vector, NOW(), NOW())
               ON CONFLICT (id, type, location) DO UPDATE SET
                 content = EXCLUDED.content,
-                embedding = EXCLUDED.embedding,
+                name = EXCLUDED.name,
+                embedding = EXCLUDED.embedding::vector,
                 updated_at = NOW()
               RETURNING id`,
               [
                 hash,
                 organization_id,
-                "document",
+                type,
                 url,
                 cleaned_content,
-                url,
-                embeddings,
+                title || url,
+                formattedEmbedding,
               ]
             );
-            console.log(`Inserted document single: ${normalizedUrl}`, res.rows);
+            console.log(`Inserted ${type} single: ${normalizedUrl}`, res.rows);
             return res.rows.length > 0;
           });
         });
       });
-      console.log(`Processed document single: ${normalizedUrl}`, result);
       return result === true;
     } else {
       // Multiple chunks case
@@ -1003,6 +1355,16 @@ async function processDocument(
               .createHash("sha256")
               .update(chunkLocation)
               .digest("hex");
+
+            const formattedEmbedding = embeddings[i];
+            if (!formattedEmbedding || typeof formattedEmbedding !== "string") {
+              console.error(
+                `Invalid embedding format for chunk ${i}:`,
+                formattedEmbedding
+              );
+              return false;
+            }
+
             return await dbQueue.add(async () => {
               return await executeQuery(async (client) => {
                 const res = await client.query(
@@ -1018,10 +1380,11 @@ async function processDocument(
                     original_location,
                     created_at,
                     updated_at
-                  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+                  ) VALUES ($1, $2, $3, $4, $5, $6, $7::vector, $8, $9, NOW(), NOW())
                   ON CONFLICT (id, type, location) DO UPDATE SET
                     content = EXCLUDED.content,
-                    embedding = EXCLUDED.embedding,
+                    name = EXCLUDED.name,
+                    embedding = EXCLUDED.embedding::vector,
                     is_chunk = EXCLUDED.is_chunk,
                     original_location = EXCLUDED.original_location,
                     updated_at = NOW()
@@ -1029,17 +1392,17 @@ async function processDocument(
                   [
                     chunkHash,
                     organization_id,
-                    "document",
+                    type,
                     chunkLocation,
                     chunk,
-                    `${url} (Part ${i + 1})`,
-                    embeddings[i],
+                    `${title || url} (Part ${i + 1})`,
+                    formattedEmbedding,
                     true,
                     url,
                   ]
                 );
                 console.log(
-                  `Inserted document chunk: ${normalizedUrl}`,
+                  `Inserted ${type} chunk: ${normalizedUrl}`,
                   res.rows
                 );
                 return res.rows.length > 0;
@@ -1048,13 +1411,95 @@ async function processDocument(
           })
         )
       );
-      console.log(`Processed document chunks: ${normalizedUrl}`, results);
       return results.every(
-        (result: any) => result.status === "fulfilled" && result.value !== null
+        (result) => result.status === "fulfilled" && result.value === true
       );
     }
   } catch (error) {
     console.error("Fatal error in processDocument:", error);
     return false;
+  }
+}
+
+// Add this new function after the downloadAndProcessPdf function
+async function getYoutubeVideoId(url: string): Promise<string | null> {
+  try {
+    const urlObj = new URL(url);
+    if (urlObj.hostname.includes("youtube.com")) {
+      return urlObj.searchParams.get("v");
+    } else if (urlObj.hostname === "youtu.be") {
+      return urlObj.pathname.slice(1);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Add this new function after filter_content
+async function filter_youtube_content(transcript: string) {
+  try {
+    if (!transcript || transcript.length < 50) {
+      console.log("Transcript too short, skipping filtering");
+      return null;
+    }
+
+    const prompt = `
+      You are a YouTube transcript specialist. Your task is to:
+      1. Create a clear, well-structured summary of the video content
+      2. Include:
+         - Main topics and key points
+         - Important insights or takeaways
+         - Key examples or demonstrations
+         - Relevant technical details
+      3. Remove:
+         - Advertisements
+         - Sponsorship messages
+         - Like/subscribe reminders
+         - Redundant information
+         - Filler words and phrases
+      4. Format the output as clean, readable text
+      5. Maintain technical accuracy while improving readability
+
+      Return only the processed content, without any explanations.
+
+      Content to process:
+      
+      ${transcript.slice(0, 84500).replace(/\n/g, " ")}
+    `;
+
+    const filterPromise = withRetry(
+      async () => {
+        const completion = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: 4000,
+          temperature: 0.3,
+          presence_penalty: -0.5,
+          frequency_penalty: 0.3,
+        });
+        return completion;
+      },
+      { maxRetries: 3, initialDelay: 1000 }
+    ) as any;
+
+    const response = await filterPromise;
+
+    if (!response?.choices?.[0]?.message?.content) {
+      console.error("No response from OpenAI API for YouTube processing");
+      return null;
+    }
+
+    const filtered_content = response.choices[0].message.content.trim();
+
+    if (!filtered_content || filtered_content.length < 50) {
+      console.warn("Filtered YouTube content seems too short or empty");
+      return null;
+    }
+
+    return filtered_content;
+  } catch (error) {
+    console.error("Fatal error in filter_youtube_content:", error);
+    return null;
   }
 }

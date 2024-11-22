@@ -19,6 +19,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.1",
     "@aws-sdk/client-s3": "^3.676.0",
+    "@octokit/rest": "^21.0.2",
     "@privy-io/server-auth": "^1.15.0",
     "@socket.io/redis-streams-adapter": "^0.2.2",
     "@sparticuz/chromium": "^131.0.0",
@@ -26,8 +27,10 @@
     "@types/node-fetch": "^2.6.12",
     "@types/pdf-parse": "^1.1.4",
     "axios": "^1.7.7",
+    "base-64": "^1.0.0",
     "cors": "^2.8.5",
     "express": "^4.21.1",
+    "googleapis": "^144.0.0",
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
     "node-cron": "^3.0.3",
@@ -44,9 +47,11 @@
     "replicate": "^1.0.1",
     "socket.io": "^4.8.0",
     "socket.io-client": "^4.8.0",
-    "uuid": "^10.0.0"
+    "uuid": "^10.0.0",
+    "youtube-transcript": "^1.2.1"
   },
   "devDependencies": {
+    "@types/base-64": "^1.0.2",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/morgan": "^1.9.9",
