@@ -477,6 +477,34 @@ async function transcribeYoutubeVideo(
       throw new Error("Invalid YouTube URL");
     }
 
+    const urlId = crypto.createHash("sha256").update(url).digest("hex");
+
+    // Check if video was already processed
+    const status = await dbQueue.add(async () => {
+      const result = await executeQuery(async (client) => {
+        const res = await client.query(
+          `SELECT status FROM context_processing_status 
+           WHERE id = $1 AND type = 'video' AND company_id = $2`,
+          [urlId, organization_id]
+        );
+        return res.rows[0]?.status;
+      });
+      return result;
+    });
+
+    if (status === ProcessingStatus.COMPLETED) {
+      console.log(`YouTube video ${url} was previously processed - skipping`);
+      return { transcript: "", title }; // Return empty transcript to skip processing
+    }
+
+    // Update status to processing
+    await updateProcessingStatus(
+      urlId,
+      url,
+      ProcessingStatus.PROCESSING,
+      organization_id
+    );
+
     console.log(
       `Transcribing YouTube video: ${videoId} - ${title || "Unknown Title"}`
     );
@@ -501,9 +529,28 @@ async function transcribeYoutubeVideo(
       ? `Title: ${title}\n${filteredContent || fullText}`
       : filteredContent || fullText;
 
+    // Update status to completed
+    await updateProcessingStatus(
+      urlId,
+      url,
+      ProcessingStatus.COMPLETED,
+      organization_id
+    );
+
     return { transcript: formattedTranscript, title };
   } catch (error) {
     console.error("Error transcribing YouTube video:", error);
+
+    // Update status to failed
+    const urlId = crypto.createHash("sha256").update(url).digest("hex");
+    await updateProcessingStatus(
+      urlId,
+      url,
+      ProcessingStatus.FAILED,
+      organization_id,
+      error.message
+    );
+
     throw error;
   }
 }
@@ -869,6 +916,36 @@ async function processGithubRepo(
   organization_id: string
 ): Promise<boolean> {
   try {
+    const urlId = crypto.createHash("sha256").update(repoUrl).digest("hex");
+
+    // Check if repository was already processed
+    const status = await dbQueue.add(async () => {
+      const result = await executeQuery(async (client) => {
+        const res = await client.query(
+          `SELECT status FROM context_processing_status 
+           WHERE id = $1 AND type = 'repository' AND company_id = $2`,
+          [urlId, organization_id]
+        );
+        return res.rows[0]?.status;
+      });
+      return result;
+    });
+
+    if (status === ProcessingStatus.COMPLETED) {
+      console.log(
+        `GitHub repository ${repoUrl} was previously processed - skipping`
+      );
+      return true;
+    }
+
+    // Update status to processing
+    await updateProcessingStatus(
+      urlId,
+      repoUrl,
+      ProcessingStatus.PROCESSING,
+      organization_id
+    );
+
     // Extract owner and repo from GitHub URL
     const urlParts = repoUrl.replace("https://github.com/", "").split("/");
     const owner = urlParts[0];
@@ -979,9 +1056,28 @@ async function processGithubRepo(
       }
     }
 
+    // Update status to completed at the end
+    await updateProcessingStatus(
+      urlId,
+      repoUrl,
+      ProcessingStatus.COMPLETED,
+      organization_id
+    );
+
     return true;
   } catch (error) {
     console.error("Error processing GitHub repository:", error);
+
+    // Update status to failed
+    const urlId = crypto.createHash("sha256").update(repoUrl).digest("hex");
+    await updateProcessingStatus(
+      urlId,
+      repoUrl,
+      ProcessingStatus.FAILED,
+      organization_id,
+      error.message
+    );
+
     return false;
   }
 }
