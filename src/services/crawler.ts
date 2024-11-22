@@ -503,7 +503,8 @@ async function transcribeYoutubeVideo(
       urlId,
       url,
       ProcessingStatus.PROCESSING,
-      organization_id
+      organization_id,
+      "video"
     );
 
     console.log(
@@ -535,7 +536,8 @@ async function transcribeYoutubeVideo(
       urlId,
       url,
       ProcessingStatus.COMPLETED,
-      organization_id
+      organization_id,
+      "video"
     );
 
     return { transcript: formattedTranscript, title };
@@ -549,7 +551,8 @@ async function transcribeYoutubeVideo(
       url,
       ProcessingStatus.FAILED,
       organization_id,
-      error.message
+      error.message,
+      "video"
     );
 
     throw error;
@@ -817,7 +820,8 @@ async function updateProcessingStatus(
   url: string,
   status: ProcessingStatus,
   organization_id: string,
-  errorMessage?: string
+  errorMessage?: string,
+  type: "document" | "code" | "video" = "document"
 ): Promise<void> {
   try {
     await dbQueue.add(async () => {
@@ -843,7 +847,7 @@ async function updateProcessingStatus(
             [
               urlId,
               organization_id,
-              "document",
+              type,
               url,
               url,
               status,
@@ -864,7 +868,7 @@ async function updateProcessingStatus(
               status = EXCLUDED.status,
               error_message = EXCLUDED.error_message,
               updated_at = NOW()`,
-            [urlId, organization_id, "document", status, errorMessage || null]
+            [urlId, organization_id, type, status, errorMessage || null]
           );
         }
       });
@@ -913,7 +917,7 @@ const SUPPORTED_EXTENSIONS = [
 
 // Update these constants for GitHub rate limiting
 const GITHUB_RATE_LIMIT = {
-  WAIT_BUFFER: 3000000, // 50 minutes buffer after reset time
+  WAIT_BUFFER: 1800000, // 3 minutes buffer after reset time
   MAX_WAIT_TIME: 7200000, // 2 hours maximum wait time
 };
 
@@ -954,8 +958,8 @@ async function processGithubRepo(
       const result = await executeQuery(async (client) => {
         const res = await client.query(
           `SELECT status FROM context_processing_status 
-           WHERE id = $1 AND type = 'repository' AND company_id = $2`,
-          [urlId, organization_id]
+           WHERE id = $1 AND type = $2 AND company_id = $3`,
+          [urlId, "code", organization_id]
         );
         return res.rows[0]?.status;
       });
@@ -974,7 +978,9 @@ async function processGithubRepo(
       urlId,
       repoUrl,
       ProcessingStatus.PROCESSING,
-      organization_id
+      organization_id,
+      undefined,
+      "code"
     );
 
     // Extract owner and repo from GitHub URL
@@ -1112,7 +1118,9 @@ async function processGithubRepo(
       urlId,
       repoUrl,
       ProcessingStatus.COMPLETED,
-      organization_id
+      organization_id,
+      undefined,
+      "code"
     );
 
     return true;
@@ -1126,7 +1134,8 @@ async function processGithubRepo(
       repoUrl,
       ProcessingStatus.FAILED,
       organization_id,
-      error.message
+      error.message,
+      "code"
     );
 
     return false;
@@ -1209,7 +1218,9 @@ export async function crawl_website(
         urlId,
         base_url,
         ProcessingStatus.PROCESSING,
-        organization_id
+        organization_id,
+        undefined,
+        "document"
       );
 
       console.log(`Starting scrape for ${base_url}`);
@@ -1253,7 +1264,8 @@ export async function crawl_website(
             base_url,
             success ? ProcessingStatus.COMPLETED : ProcessingStatus.FAILED,
             organization_id,
-            success ? undefined : "Failed to process document"
+            success ? undefined : "Failed to process document",
+            "document"
           );
         } else {
           console.log(`No filtered content produced for ${base_url}`);
@@ -1262,7 +1274,8 @@ export async function crawl_website(
             base_url,
             ProcessingStatus.FAILED,
             organization_id,
-            "No content after filtering"
+            "No content after filtering",
+            "document"
           );
         }
       }
@@ -1404,7 +1417,8 @@ export async function crawl_website(
         base_url,
         ProcessingStatus.FAILED,
         organization_id,
-        error.message
+        error.message,
+        "code"
       );
       return [];
     }
