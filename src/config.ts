@@ -15,7 +15,10 @@ export const config = {
     database: process.env.POSTGRES_DB || "postgres",
     password: process.env.POSTGRES_PASSWORD || "postgres",
     port: parseInt(process.env.POSTGRES_PORT || "54322", 10),
-    url: process.env.POSTGRES_URL as string,
+    ssl:
+      process.env.POSTGRES_SSL === "true"
+        ? { rejectUnauthorized: false }
+        : undefined,
   },
   server: {
     port: parseInt(process.env.PORT || "4000", 10),

@@ -6,7 +6,7 @@ import { redis } from "./initalizers/redis";
 import cors from "cors";
 import { pool } from "./initalizers/postgres";
 import privy from "./initalizers/privy";
-import { initializeSocket, io } from "./initalizers/io";
+
 import { getUsersByIds } from "./services/user";
 
 import dotenv from "dotenv";
@@ -17,8 +17,6 @@ dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);
-
-initializeSocket(httpServer);
 
 // Middleware
 
