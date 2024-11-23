@@ -5,25 +5,34 @@ const router = express.Router();
 
 router.post("/", async (req, res) => {
   try {
-    const { url: rawUrl, maxDepth = 7, organization_id } = req.body;
+    const { urls: rawUrls, maxDepth = 7, organization_id } = req.body;
 
-    if (!rawUrl || !organization_id) {
+    if (!rawUrls || !organization_id) {
       return res
         .status(400)
-        .json({ error: "URL and organization_id are required" });
+        .json({ error: "URLs and organization_id are required" });
     }
 
-    // Remove trailing slash from URL
-    const url = rawUrl.replace(/\/$/, "");
+    // Split URLs by comma and trim whitespace
+    const urls = rawUrls
+      .split(",")
+      .map((url: string) => url.trim().replace(/\/$/, ""))
+      .filter((url: string) => url.length > 0);
 
-    // Start crawling in the background
-    crawl_website(url, maxDepth, organization_id).catch((error) => {
-      console.error("Crawling failed:", error);
+    if (urls.length === 0) {
+      return res.status(400).json({ error: "No valid URLs provided" });
+    }
+
+    // Start crawling each URL in the background
+    urls.forEach((url: string) => {
+      crawl_website(url, maxDepth, organization_id).catch((error) => {
+        console.error(`Crawling failed for ${url}:`, error);
+      });
     });
 
     return res.json({
       message: "Crawling started successfully",
-      url,
+      urls,
     });
   } catch (error: any) {
     res.status(500).json({
