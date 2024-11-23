@@ -6,13 +6,14 @@ import {
 } from "../../services/openai";
 import { withRetry } from "../../services/crawler";
 import openai from "../../initalizers/openai";
+import { conversationLimiter } from "../../middleware/rateLimiter";
 
 const router = Router();
 
 // Add this helper function before the router.post
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-router.post("/", async (req, res) => {
+router.post("/", conversationLimiter, async (req, res) => {
   console.log(
     "Starting conversation request with question:",
     req.body.question

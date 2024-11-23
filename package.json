@@ -43,6 +43,7 @@
     "pgvector": "^0.2.0",
     "playwright": "^1.49.0",
     "puppeteer": "^23.8.0",
+    "rate-limit-redis": "^4.2.0",
     "redis": "^4.7.0",
     "replicate": "^1.0.1",
     "socket.io": "^4.8.0",
