@@ -16,20 +16,29 @@ const router = Router();
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 router.post("/", conversationLimiter, async (req, res) => {
-  console.log(
-    "Starting conversation request with question:",
-    req.body.question
-  );
-
   const question = req.body.question;
   const messages = req.body.messages;
   const userId = req.body.userId as string;
   const teamId = req.body.teamId as string;
+
   if (!question) {
     return res.status(400).json({ message: "question is required." });
   }
 
   const decodedQuestion = decodeURIComponent(question as string);
+  // Fetch the team's system prompt name
+  const teamQuery = await pool.query(
+    "SELECT * FROM teams WHERE id = $1 AND deleted_at IS NULL",
+    [teamId]
+  );
+
+  if (teamQuery.rows.length === 0) {
+    return res.status(404).json({ message: "Team not found" });
+  }
+
+  const systemPromptName = teamQuery.rows[0].system_prompt_name;
+  const teamName = teamQuery.rows[0].name;
+  const userType = teamQuery.rows[0].user_type;
 
   try {
     amplitudeClient.track(
@@ -60,7 +69,7 @@ router.post("/", conversationLimiter, async (req, res) => {
     WHERE company_id = $2
     ORDER BY similarity
     LIMIT 24`,
-    [questionEmbedding, teamId]
+    [questionEmbedding, teamName]
   );
 
   const codeEmbeddings = codeEmbeddingsQuery.rows;
@@ -153,7 +162,9 @@ ${embedding.content}
     let chunkCount = 0;
     for await (const chunk of generateChatResponseWithRetry(
       limitedContext,
-      messages
+      messages,
+      systemPromptName,
+      userType
     )) {
       chunkCount++;
       if (chunkCount % 50 === 0) {

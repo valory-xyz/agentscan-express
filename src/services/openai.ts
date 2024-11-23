@@ -14,6 +14,9 @@ export const TOKEN_OVERLAP = 25; // Reduced from 50
 export const MIN_CHUNK_LENGTH = 100;
 export const ABSOLUTE_MAX_TOKENS = 7000; // Reduced from 8000
 
+// Add this type definition at the top with other interfaces
+type UserType = "developer" | "consumer" | "business";
+
 // Helper function to estimate tokens (rough approximation)
 export function estimateTokens(text: string): number {
   // More aggressive token estimation
@@ -341,22 +344,49 @@ function extractValidLinks(contexts: DocumentReference[]): Map<string, string> {
 
 function createSystemPrompt(
   context: string,
-  validLinks: Map<string, string>
+  validLinks: Map<string, string>,
+  system_prompt_name: string,
+  userType: UserType = "consumer"
 ): ChatCompletionMessageParam {
   const linkList = Array.from(validLinks.entries())
     .map(([text, url]) => `- ${text}: ${url}`)
     .join("\n");
 
+  const personalityTraits = {
+    developer: `
+- I provide technical, implementation-focused responses
+- I include code examples when relevant
+- I reference API documentation and technical specifications
+- I assume familiarity with programming concepts
+- I can discuss architecture and best practices
+- I use technical terminology appropriately`,
+    consumer: `
+- I avoid technical jargon unless necessary
+- I explain concepts in simple, accessible terms
+- I focus on practical use cases and benefits
+- I provide step-by-step guidance when needed
+- I use analogies to explain complex concepts
+- I emphasize user-friendly features and interfaces`,
+    business: `
+- I focus on business value and use cases
+- I discuss integration and scalability aspects
+- I emphasize ROI and business benefits
+- I reference case studies when available
+- I balance technical and business perspectives
+- I consider enterprise requirements and concerns`,
+  };
+
   return {
     role: "system",
-    content: `I'm Andy, and I speak directly to users about my capabilities and expertise with the Olas protocol. I avoid unnecessary greetings and get straight to helping.
+    content: `I'm Andy, and I speak directly to users about my capabilities and expertise with the ${system_prompt_name}. I avoid unnecessary greetings and get straight to helping.
 
 About me:
-- I'm an AI agent built on the Olas protocol
-- I specialize in helping you understand and work with Olas technology
-- I can assist you with technical questions, documentation, and practical implementation
-- I have direct access to comprehensive Olas documentation and can point you to specific references
+- I'm an AI agent built on the ${system_prompt_name}
+- I specialize in helping you understand and work with ${system_prompt_name} technology
+- I can assist you with technical questions, documentation, practical implementation, and pointing you to ${system_prompt_name} resources
 - I aim to be friendly while maintaining technical accuracy in our conversations
+
+${personalityTraits[userType]}
 
 IMPORTANT: I can ONLY reference these validated links in my responses:
 ${linkList}
@@ -373,7 +403,7 @@ How I communicate:
 * I get straight to answers without greetings
 * I'm direct about what I can and cannot help with
 * I break down complex topics into simpler terms
-* I only answer questions related to Olas
+* I only answer questions related to ${system_prompt_name}
 * I don't provide financial advice`,
   };
 }
@@ -402,11 +432,16 @@ ${ctx.content}
 export async function* generateChatResponseWithRetry(
   context: DocumentReference[],
   messages: ChatCompletionMessageParam[],
+  system_prompt_name: string,
   options?: RetryOptions
 ) {
   const contextString = formatContextForPrompt(context);
   const validLinks = extractValidLinks(context);
-  const systemPrompt = createSystemPrompt(contextString, validLinks);
+  const systemPrompt = createSystemPrompt(
+    contextString,
+    validLinks,
+    system_prompt_name
+  );
 
   try {
     const stream = await openai.chat.completions.create({
