@@ -8,6 +8,8 @@ import { withRetry } from "../../services/crawler";
 import openai from "../../initalizers/openai";
 import { conversationLimiter } from "../../middleware/rateLimiter";
 
+import { amplitudeClient } from "../../initalizers/amplitude";
+
 const router = Router();
 
 // Add this helper function before the router.post
@@ -21,15 +23,31 @@ router.post("/", conversationLimiter, async (req, res) => {
 
   const question = req.body.question;
   const messages = req.body.messages;
-
+  const userId = req.body.userId as string;
+  const teamId = req.body.teamId as string;
   if (!question) {
     return res.status(400).json({ message: "question is required." });
   }
-  //decode URI
+
   const decodedQuestion = decodeURIComponent(question as string);
 
+  try {
+    amplitudeClient.track(
+      "conversation_made",
+      {
+        team_id: teamId || "unknown",
+        question: decodedQuestion,
+        messages: messages,
+      },
+      {
+        user_id: userId || "anonymous",
+      }
+    );
+  } catch (error) {
+    console.error("Error tracking conversation:", error);
+  }
+
   const questionEmbedding = await generateEmbeddingWithRetry(decodedQuestion);
-  console.log("Generated embedding for question");
 
   const codeEmbeddingsQuery = await pool.query(
     `SELECT 
@@ -43,9 +61,6 @@ router.post("/", conversationLimiter, async (req, res) => {
     ORDER BY similarity
     LIMIT 24`,
     [questionEmbedding, "olas"]
-  );
-  console.log(
-    `Retrieved ${codeEmbeddingsQuery.rows.length} initial embeddings`
   );
 
   const codeEmbeddings = codeEmbeddingsQuery.rows;
@@ -110,8 +125,6 @@ ${embedding.content}
     .filter(({ score }) => score >= 4)
     .map(({ index }) => index);
 
-  console.log("Relevant indices:", relevantIndices);
-
   const relevantContext = codeEmbeddings
     .filter((_, index) => relevantIndices.includes(index))
     .map((embedding) => ({
@@ -150,16 +163,13 @@ ${embedding.content}
       try {
         // Add a small random delay between chunks (between 75-125ms)
         await sleep(75 + Math.random() * 50);
-        console.log(`Writing chunk ${chunk}`);
+
         res.write(`${JSON.stringify({ content: chunk })}\n\n`);
       } catch (writeError) {
         console.error("Error writing chunk:", writeError);
         throw writeError;
       }
     }
-    console.log(
-      `Streaming completed successfully. Total chunks: ${chunkCount}`
-    );
 
     try {
       res.write(`${JSON.stringify({ done: true })}\n\n`);

@@ -25,4 +25,7 @@ export const config = {
     groupName: process.env.CHAT_GROUP_NAME || "chat_group",
     consumerPrefix: process.env.CHAT_CONSUMER_PREFIX || "consumer",
   },
+  amplitude: {
+    apiKey: process.env.AMPLITUDE_API_KEY || "",
+  },
 };
