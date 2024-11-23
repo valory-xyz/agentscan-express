@@ -60,7 +60,7 @@ router.post("/", conversationLimiter, async (req, res) => {
     WHERE company_id = $2
     ORDER BY similarity
     LIMIT 24`,
-    [questionEmbedding, "olas"]
+    [questionEmbedding, teamId]
   );
 
   const codeEmbeddings = codeEmbeddingsQuery.rows;
