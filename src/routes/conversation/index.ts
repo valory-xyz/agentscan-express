@@ -9,8 +9,11 @@ import openai from "../../initalizers/openai";
 import { conversationLimiter } from "../../middleware/rateLimiter";
 
 import { amplitudeClient } from "../../initalizers/amplitude";
+import { redis } from "../../initalizers/redis";
 
 const router = Router();
+const CACHE_TTL = 3 * 60 * 60;
+const TEAM_CACHE_TTL = 30 * 60;
 
 // Add this helper function before the router.post
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -26,19 +29,57 @@ router.post("/", conversationLimiter, async (req, res) => {
   }
 
   const decodedQuestion = decodeURIComponent(question as string);
-  // Fetch the team's system prompt name
-  const teamQuery = await pool.query(
-    "SELECT * FROM teams WHERE id = $1 AND deleted_at IS NULL",
-    [teamId]
-  );
 
-  if (teamQuery.rows.length === 0) {
-    return res.status(404).json({ message: "Team not found" });
+  // Generate cache key using deployment ID and request parameters
+  const deploymentId = process.env.RAILWAY_DEPLOYMENT_ID || "local";
+  const cacheKey = `conversation:${deploymentId}:${teamId}:${Buffer.from(
+    decodedQuestion
+  ).toString("base64")}`;
+
+  // Create team cache key
+  const teamCacheKey = `team:${teamId}`;
+
+  // Try to get team from cache first
+  let teamData;
+  try {
+    const cachedTeam = await redis.get(teamCacheKey);
+    if (cachedTeam) {
+      teamData = JSON.parse(cachedTeam);
+    } else {
+      const teamQuery = await pool.query(
+        "SELECT * FROM teams WHERE id = $1 AND deleted_at IS NULL",
+        [teamId]
+      );
+
+      if (teamQuery.rows.length === 0) {
+        return res.status(404).json({ message: "Team not found" });
+      }
+
+      teamData = teamQuery.rows[0];
+
+      // Cache the team data
+      await redis.set(teamCacheKey, JSON.stringify(teamData), {
+        EX: TEAM_CACHE_TTL,
+      });
+    }
+  } catch (error) {
+    console.error("Error with team cache:", error);
+    // Fallback to direct database query if cache fails
+    const teamQuery = await pool.query(
+      "SELECT * FROM teams WHERE id = $1 AND deleted_at IS NULL",
+      [teamId]
+    );
+
+    if (teamQuery.rows.length === 0) {
+      return res.status(404).json({ message: "Team not found" });
+    }
+
+    teamData = teamQuery.rows[0];
   }
 
-  const systemPromptName = teamQuery.rows[0].system_prompt_name;
-  const teamName = teamQuery.rows[0].name;
-  const userType = teamQuery.rows[0].user_type;
+  const systemPromptName = teamData.system_prompt_name;
+  const teamName = teamData.name;
+  const userType = teamData.user_type;
 
   try {
     amplitudeClient.track(
@@ -54,6 +95,31 @@ router.post("/", conversationLimiter, async (req, res) => {
     );
   } catch (error) {
     console.error("Error tracking conversation:", error);
+  }
+
+  // Check cache first
+  try {
+    const cachedResponse = await redis.get(cacheKey);
+    if (cachedResponse) {
+      console.log("Cache hit for question:", decodedQuestion);
+      const chunks = JSON.parse(cachedResponse);
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      await sleep(500);
+      for (const chunk of chunks) {
+        await sleep(70 + Math.random() * 50);
+        res.write(`${JSON.stringify({ content: chunk })}\n\n`);
+      }
+
+      res.write(`${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+      return;
+    }
+  } catch (cacheError) {
+    console.error("Cache error:", cacheError);
+    // Continue with normal flow if cache fails
   }
 
   const questionEmbedding = await generateEmbeddingWithRetry(decodedQuestion);
@@ -151,12 +217,12 @@ ${embedding.content}
   console.log(
     `Selected ${relevantIndices.length} relevant contexts after filtering`
   );
-  console.log(`Final limited context count: ${limitedContext.length}`);
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  console.log("Headers set, beginning streaming response");
+
+  const responseChunks: string[] = [];
 
   try {
     let chunkCount = 0;
@@ -167,19 +233,31 @@ ${embedding.content}
       userType
     )) {
       chunkCount++;
+      responseChunks.push(chunk); // Store chunk for caching
+
       if (chunkCount % 50 === 0) {
         console.log(`Streamed ${chunkCount} chunks so far`);
       }
 
       try {
         // Add a small random delay between chunks (between 75-125ms)
-        await sleep(75 + Math.random() * 50);
+        await sleep(70 + Math.random() * 50);
 
         res.write(`${JSON.stringify({ content: chunk })}\n\n`);
       } catch (writeError) {
         console.error("Error writing chunk:", writeError);
         throw writeError;
       }
+    }
+
+    // Cache the response after successful generation
+    try {
+      redis.set(cacheKey, JSON.stringify(responseChunks), {
+        EX: CACHE_TTL,
+      });
+      console.log("Cached response for question:", decodedQuestion);
+    } catch (cacheError) {
+      console.error("Error caching response:", cacheError);
     }
 
     try {
