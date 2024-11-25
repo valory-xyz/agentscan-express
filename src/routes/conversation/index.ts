@@ -29,6 +29,7 @@ const isStakingOrRunningQuery = (question: string): boolean => {
     "run olas",
     "running olas",
     "how to run",
+    "to run",
     "easiest way to run",
   ];
   return stakingPatterns.some((pattern) => lowerQuestion.includes(pattern));
