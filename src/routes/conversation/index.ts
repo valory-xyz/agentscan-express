@@ -149,7 +149,7 @@ router.post("/", conversationLimiter, async (req, res) => {
       type,
       (embedding <=> $1) * 
       CASE 
-        WHEN $2 = 'olas' AND LOWER(content) LIKE ANY(ARRAY['%stake olas%', '%run olas%', '%staking%']) AND $4 THEN 0.5
+        WHEN $2 = 'olas' AND $4 THEN 0.5
         WHEN LOWER(content) LIKE $3 THEN 0.7
         WHEN LOWER(name) LIKE $3 THEN 0.8
         ELSE 1.0
