@@ -18,6 +18,22 @@ const TEAM_CACHE_TTL = 30 * 60;
 // Add this helper function before the router.post
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Add helper function to detect staking/running related queries
+const isStakingOrRunningQuery = (question: string): boolean => {
+  const lowerQuestion = question.toLowerCase();
+  const stakingPatterns = [
+    "stake olas",
+    "staking olas",
+    "how to stake",
+    "easiest way to stake",
+    "run olas",
+    "running olas",
+    "how to run",
+    "easiest way to run",
+  ];
+  return stakingPatterns.some((pattern) => lowerQuestion.includes(pattern));
+};
+
 router.post("/", conversationLimiter, async (req, res) => {
   const question = req.body.question;
   const messages = req.body.messages;
@@ -130,12 +146,23 @@ router.post("/", conversationLimiter, async (req, res) => {
       name,
       location,
       type,
-      embedding <=> $1 as similarity
+      (embedding <=> $1) * 
+      CASE 
+        WHEN $2 = 'olas' AND LOWER(content) LIKE ANY(ARRAY['%stake olas%', '%run olas%', '%staking%']) AND $4 THEN 0.5
+        WHEN LOWER(content) LIKE $3 THEN 0.7
+        WHEN LOWER(name) LIKE $3 THEN 0.8
+        ELSE 1.0
+      END as similarity
     FROM context_embeddings 
     WHERE company_id = $2
     ORDER BY similarity
     LIMIT 24`,
-    [questionEmbedding, teamName]
+    [
+      questionEmbedding,
+      teamName,
+      `%${decodedQuestion.toLowerCase()}%`,
+      isStakingOrRunningQuery(decodedQuestion),
+    ]
   );
 
   const codeEmbeddings = codeEmbeddingsQuery.rows;
