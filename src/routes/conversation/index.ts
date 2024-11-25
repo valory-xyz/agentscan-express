@@ -18,22 +18,17 @@ const TEAM_CACHE_TTL = 30 * 60;
 // Add this helper function before the router.post
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Add helper function to detect staking/running related queries
-const isStakingOrRunningQuery = (question: string): boolean => {
-  const lowerQuestion = question.toLowerCase();
-  const stakingPatterns = [
-    "stake olas",
-    "staking olas",
-    "how to stake",
-    "easiest way to stake",
-    "run olas",
-    "running olas",
-    "how to run",
-    "to run",
-    "easiest way to run",
-  ];
-  return stakingPatterns.some((pattern) => lowerQuestion.includes(pattern));
-};
+const STAKING_PATTERNS = [
+  "stake olas",
+  "staking olas",
+  "how to stake",
+  "easiest way to stake",
+  "run olas",
+  "running olas",
+  "how to run",
+  "to run",
+  "easiest way to run",
+].map((pattern) => `%${pattern}%`);
 
 router.post("/", conversationLimiter, async (req, res) => {
   const question = req.body.question;
@@ -141,6 +136,18 @@ router.post("/", conversationLimiter, async (req, res) => {
 
   const questionEmbedding = await generateEmbeddingWithRetry(decodedQuestion);
 
+  const STAKING_PATTERNS = [
+    "stake olas",
+    "staking olas",
+    "how to stake",
+    "easiest way to stake",
+    "run olas",
+    "running olas",
+    "how to run",
+    "to run",
+    "easiest way to run",
+  ].map((pattern) => `%${pattern}%`);
+
   const codeEmbeddingsQuery = await pool.query(
     `SELECT 
       content,
@@ -149,7 +156,13 @@ router.post("/", conversationLimiter, async (req, res) => {
       type,
       (embedding <=> $1) * 
       CASE 
-        WHEN $2 = 'olas' AND $4 THEN 0.5
+        WHEN $2 = 'olas' AND LOWER($3) LIKE ANY(ARRAY[${STAKING_PATTERNS.map(
+          (_, i) => `$${i + 4}`
+        ).join(", ")}]) 
+          AND LOWER(content) LIKE '%pearl%' THEN 0.3  -- Boost Pearl content highest
+        WHEN $2 = 'olas' AND LOWER($3) LIKE ANY(ARRAY[${STAKING_PATTERNS.map(
+          (_, i) => `$${i + 4}`
+        ).join(", ")}]) THEN 0.5
         WHEN LOWER(content) LIKE $3 THEN 0.7
         WHEN LOWER(name) LIKE $3 THEN 0.8
         ELSE 1.0
@@ -162,7 +175,7 @@ router.post("/", conversationLimiter, async (req, res) => {
       questionEmbedding,
       teamName,
       `%${decodedQuestion.toLowerCase()}%`,
-      isStakingOrRunningQuery(decodedQuestion),
+      ...STAKING_PATTERNS,
     ]
   );
 
