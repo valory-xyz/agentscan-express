@@ -81,14 +81,16 @@ router.post("/", async (req: any, res) => {
   const userType = teamData.user_type;
 
   try {
-    // Create identify object only if we have a valid user ID
     const amplitudeProperties = {
       team_id: teamId || "unknown",
       question: decodedQuestion,
       messages: messages,
     };
 
-    const amplitudeOptions = user?.privy_did ? { user_id: user.privy_did } : {};
+    const amplitudeOptions = {
+      user_id: user?.privy_did || "unknown",
+      user_properties: { is_anonymous: !user?.privy_did },
+    };
 
     amplitudeClient.track(
       "conversation_made",
