@@ -88,7 +88,7 @@ router.post("/", async (req: any, res) => {
     };
 
     const amplitudeOptions = {
-      user_id: user?.privy_did || "unknown",
+      ...(user?.privy_did && { user_id: user.privy_did }),
       user_properties: { is_anonymous: !user?.privy_did },
     };
 
