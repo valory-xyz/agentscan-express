@@ -6,7 +6,6 @@ import {
 } from "../../services/openai";
 import { withRetry } from "../../services/crawler";
 import openai from "../../initalizers/openai";
-import { conversationLimiter } from "../../middleware/rateLimiter";
 
 import { amplitudeClient } from "../../initalizers/amplitude";
 import { redis } from "../../initalizers/redis";
