@@ -18,22 +18,10 @@ const TEAM_CACHE_TTL = 30 * 60;
 // Add this helper function before the router.post
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const STAKING_PATTERNS = [
-  "stake olas",
-  "staking olas",
-  "how to stake",
-  "easiest way to stake",
-  "run olas",
-  "running olas",
-  "how to run",
-  "to run",
-  "easiest way to run",
-].map((pattern) => `%${pattern}%`);
-
-router.post("/", conversationLimiter, async (req, res) => {
+router.post("/", async (req: any, res) => {
   const question = req.body.question;
   const messages = req.body.messages;
-  const userId = req.body.userId as string;
+  const user = req.user;
   const teamId = req.body.teamId as string;
 
   if (!question) {
@@ -94,16 +82,19 @@ router.post("/", conversationLimiter, async (req, res) => {
   const userType = teamData.user_type;
 
   try {
+    // Create identify object only if we have a valid user ID
+    const amplitudeProperties = {
+      team_id: teamId || "unknown",
+      question: decodedQuestion,
+      messages: messages,
+    };
+
+    const amplitudeOptions = user?.id ? { user_id: user.id } : {};
+
     amplitudeClient.track(
       "conversation_made",
-      {
-        team_id: teamId || "unknown",
-        question: decodedQuestion,
-        messages: messages,
-      },
-      {
-        user_id: userId || "anonymous",
-      }
+      amplitudeProperties,
+      amplitudeOptions
     );
   } catch (error) {
     console.error("Error tracking conversation:", error);

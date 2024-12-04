@@ -37,7 +37,7 @@ async function generateUniqueUsername(baseUsername: any) {
   return username;
 }
 
-router.post("/signin", async (req, res) => {
+router.post("/", async (req, res) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return res.status(401).json({ message: "No token provided" });
@@ -48,6 +48,7 @@ router.post("/signin", async (req, res) => {
   try {
     // Verify the token using Privy
     const verifiedClaims = await privy.verifyAuthToken(token);
+
     const privy_did = verifiedClaims.userId;
 
     // Check if user is in Redis cache
@@ -66,7 +67,8 @@ router.post("/signin", async (req, res) => {
 
     if (userResult.rows.length === 0) {
       // User doesn't exist, fetch additional information from Privy
-      const privyUser = await privy.getUser(privy_did);
+      const privyUser = await privy.getUser(verifiedClaims.userId);
+
       const wallet_address = privyUser.wallet?.address.toLowerCase() ?? null;
 
       const email = privyUser.email?.address;
@@ -84,14 +86,6 @@ router.post("/signin", async (req, res) => {
           .filter(
             (account: any) =>
               account.type === "wallet" && account.chainType === "ethereum"
-          )
-          .map((account: any) => account.address) || [];
-
-      const sol_wallets =
-        privyUser.linkedAccounts
-          .filter(
-            (account: any) =>
-              account.type === "wallet" && account.chainType === "solana"
           )
           .map((account: any) => account.address) || [];
 
@@ -133,15 +127,14 @@ router.post("/signin", async (req, res) => {
       // Insert new user into the database
       try {
         const newUserResult = await pool.query(
-          `INSERT INTO users (id, privy_did, username, email, eth_wallets, sol_wallets, pfp, bio, fid,wallet_address) 
-      VALUES (uuid_generate_v4(), $1, $2, $3, $4, $5, $6, $7, $8, $9) 
+          `INSERT INTO users (privy_did, username, email, eth_wallets, pfp, bio, fid, wallet_address) 
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
       RETURNING *`,
           [
             privy_did,
             username,
             email,
             eth_wallets,
-            sol_wallets,
             pfp,
             bio,
             fid,
@@ -187,8 +180,6 @@ router.post("/signin", async (req, res) => {
             [wallet_address, privy_did]
           );
           if (updatedUserResult.rows.length === 0) {
-            //log
-            console.log("Error updating user wallet address");
           }
           user = updatedUserResult.rows[0];
           // Clear the user cache
@@ -200,7 +191,7 @@ router.post("/signin", async (req, res) => {
 
     // Cache the user in Redis
     await redis.set(`user:${privy_did}`, JSON.stringify(user), { EX: 60 * 60 }); // one hour
-
+    await redis.set(`user:${user.id}`, JSON.stringify(user), { EX: 60 * 60 }); // one hour
     res.json(user);
   } catch (error) {
     console.error("Error in /signin:", error);

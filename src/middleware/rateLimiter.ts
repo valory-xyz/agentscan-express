@@ -1,5 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import { redis } from "../initalizers/redis";
+import privy from "../initalizers/privy";
+import { pool } from "../initalizers/postgres";
+import express from "express";
 
 interface RateLimitOptions {
   windowMs: number;
@@ -7,18 +10,20 @@ interface RateLimitOptions {
   errorMessage: string;
 }
 
-export const createRateLimiter = (options: RateLimitOptions) => {
-  return async (req: Request, res: Response, next: NextFunction) => {
+const TEN_YEARS_IN_MS = 365 * 24 * 60 * 60 * 1000 * 10;
+
+// Modify the createRateLimiter to handle both authenticated and unauthenticated cases
+export const createRateLimiter = (
+  options: RateLimitOptions,
+  isUnauthenticatedLimiter = false
+): express.RequestHandler => {
+  return async (req: any, res: Response, next: NextFunction) => {
     try {
-      // Get client IP
       const ip = getClientIP(req);
       const key = `rate-limit:${ip}`;
-
-      // Get current count from Redis
       const currentCount = await redis.get(key);
 
       if (!currentCount) {
-        // First request, set initial count
         await redis.setEx(key, Math.floor(options.windowMs / 1000), "1");
         return next();
       }
@@ -26,9 +31,7 @@ export const createRateLimiter = (options: RateLimitOptions) => {
       const count = parseInt(currentCount);
 
       if (count >= options.maxRequests) {
-        // Get TTL for the key
         const ttl = await redis.ttl(key);
-
         return res.status(429).json({
           error: options.errorMessage,
           message: `Please try again in ${Math.ceil(ttl)} seconds.`,
@@ -36,15 +39,47 @@ export const createRateLimiter = (options: RateLimitOptions) => {
         });
       }
 
-      // Increment count
       await redis.incr(key);
       next();
     } catch (error) {
       console.error("Rate limiter error:", error);
-      // If rate limiting fails, allow the request to proceed
       next();
     }
   };
+};
+
+// Create the limiters
+export const unauthenticatedConversationLimiter = createRateLimiter(
+  {
+    windowMs: TEN_YEARS_IN_MS,
+    maxRequests: 3,
+    errorMessage:
+      "You have reached the maximum number of free requests. Please sign in to continue using the service.",
+  },
+  true
+);
+
+export const conversationLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 6,
+  errorMessage: "Too many requests, please try again later.",
+});
+
+export const authAndRateLimit = async (
+  req: any,
+  res: any,
+  next: any,
+  user: any
+) => {
+  try {
+    if (!user) {
+      return unauthenticatedConversationLimiter(req, res, next);
+    }
+    return conversationLimiter(req, res, next);
+  } catch (error) {
+    console.error("Auth error:", error);
+    return unauthenticatedConversationLimiter(req, res, next);
+  }
 };
 
 // Helper function to get client IP
@@ -64,10 +99,3 @@ const getClientIP = (req: Request): string => {
 
   return ip.replace(/^::ffff:/, "");
 };
-
-// Usage example
-export const conversationLimiter = createRateLimiter({
-  windowMs: 60 * 1000, // 1 minute
-  maxRequests: 6, // 6 requests per minute
-  errorMessage: "Too many requests, please try again later.",
-});
