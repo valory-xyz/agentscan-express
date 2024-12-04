@@ -50,7 +50,7 @@ export const createRateLimiter = (
 // Create the limiters
 export const unauthenticatedConversationLimiter = createRateLimiter({
   windowMs: TEN_YEARS_IN_MS,
-  maxRequests: 3,
+  maxRequests: 5,
   errorMessage:
     "You have reached the maximum number of free requests. Please sign in to continue using the service.",
 });
