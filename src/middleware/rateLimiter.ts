@@ -14,8 +14,7 @@ const TEN_YEARS_IN_MS = 365 * 24 * 60 * 60 * 1000 * 10;
 
 // Modify the createRateLimiter to handle both authenticated and unauthenticated cases
 export const createRateLimiter = (
-  options: RateLimitOptions,
-  isUnauthenticatedLimiter = false
+  options: RateLimitOptions
 ): express.RequestHandler => {
   return async (req: any, res: Response, next: NextFunction) => {
     try {
@@ -49,15 +48,12 @@ export const createRateLimiter = (
 };
 
 // Create the limiters
-export const unauthenticatedConversationLimiter = createRateLimiter(
-  {
-    windowMs: TEN_YEARS_IN_MS,
-    maxRequests: 3,
-    errorMessage:
-      "You have reached the maximum number of free requests. Please sign in to continue using the service.",
-  },
-  true
-);
+export const unauthenticatedConversationLimiter = createRateLimiter({
+  windowMs: TEN_YEARS_IN_MS,
+  maxRequests: 3,
+  errorMessage:
+    "You have reached the maximum number of free requests. Please sign in to continue using the service.",
+});
 
 export const conversationLimiter = createRateLimiter({
   windowMs: 60 * 1000,
@@ -73,8 +69,10 @@ export const authAndRateLimit = async (
 ) => {
   try {
     if (!user) {
+      console.log("No user, using unauthenticated limiter");
       return unauthenticatedConversationLimiter(req, res, next);
     }
+    console.log("User, using conversation limiter");
     return conversationLimiter(req, res, next);
   } catch (error) {
     console.error("Auth error:", error);
