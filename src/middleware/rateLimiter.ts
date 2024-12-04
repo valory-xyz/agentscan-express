@@ -19,7 +19,7 @@ export const createRateLimiter = (
   return async (req: any, res: Response, next: NextFunction) => {
     try {
       const ip = getClientIP(req);
-      const key = `rate-limit:${ip}`;
+      const key = req.rateLimitKey || `rate-limit:${ip}`;
       const currentCount = await redis.get(key);
 
       if (!currentCount) {
@@ -72,6 +72,7 @@ export const authAndRateLimit = async (
       console.log("No user, using unauthenticated limiter");
       return unauthenticatedConversationLimiter(req, res, next);
     }
+    req.rateLimitKey = `rate-limit:${user.id}`;
     console.log("User, using conversation limiter");
     return conversationLimiter(req, res, next);
   } catch (error) {
