@@ -14,7 +14,6 @@ export async function authMiddleware(
   allowNoUser: boolean = false
 ) {
   const authHeader = req.headers.authorization;
-  console.log("Auth header", authHeader);
 
   // If no auth header and allowNoUser is true, continue
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
