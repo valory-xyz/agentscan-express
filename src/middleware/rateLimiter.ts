@@ -75,7 +75,7 @@ export const authAndRateLimit = async (
     console.log("User, using conversation limiter");
     return conversationLimiter(req, res, next);
   } catch (error) {
-    console.error("Auth error:", error);
+    console.error("error in authAndRateLimit:", error);
     return unauthenticatedConversationLimiter(req, res, next);
   }
 };
