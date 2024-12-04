@@ -88,7 +88,7 @@ router.post("/", async (req: any, res) => {
       messages: messages,
     };
 
-    const amplitudeOptions = user?.id ? { user_id: user.id } : {};
+    const amplitudeOptions = user?.privy_did ? { user_id: user.privy_did } : {};
 
     amplitudeClient.track(
       "conversation_made",
