@@ -204,7 +204,8 @@ function filterAndSortContext(
 export async function* generateConversationResponse(
   question: string,
   messages: any[],
-  teamData: TeamData
+  teamData: TeamData,
+  useSleep: boolean = true
 ): AsyncGenerator<ChatResponse> {
   try {
     const decodedQuestion = decodeURIComponent(question);
@@ -221,10 +222,12 @@ export async function* generateConversationResponse(
         console.log("Cache hit for question:", decodedQuestion);
         const chunks = JSON.parse(cachedResponse);
 
-        // Stream cached response with artificial delay
         await sleep(500);
+
         for (const chunk of chunks) {
-          await sleep(70 + Math.random() * 50);
+          if (useSleep) {
+            await sleep(70 + Math.random() * 50);
+          }
           yield { content: chunk };
         }
         yield { content: "", done: true };
@@ -251,7 +254,9 @@ export async function* generateConversationResponse(
           console.log(`Streamed ${chunkCount} chunks so far`);
         }
 
-        await sleep(70 + Math.random() * 50);
+        if (useSleep) {
+          await sleep(70 + Math.random() * 50);
+        }
         yield { content: chunk };
       }
 

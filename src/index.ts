@@ -12,6 +12,8 @@ import { getUsersByIds } from "./services/user";
 import dotenv from "dotenv";
 import { Socket } from "socket.io";
 import { amplitudeClient } from "./initalizers/amplitude";
+import { initializeDiscord } from "./initalizers/discord";
+import { initializeTelegram } from "./initalizers/telegram";
 
 dotenv.config();
 
@@ -31,6 +33,8 @@ app.use("/", require("./routes").default);
 // Initialize the server
 async function initServer(): Promise<void> {
   amplitudeClient;
+  await initializeDiscord();
+  await initializeTelegram();
   httpServer.listen(config.server.port, () => {
     console.log(`Server running on port ${config.server.port}`);
   });
