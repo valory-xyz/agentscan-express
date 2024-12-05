@@ -432,8 +432,7 @@ ${ctx.content}
 export async function* generateChatResponseWithRetry(
   context: DocumentReference[],
   messages: ChatCompletionMessageParam[],
-  system_prompt_name: string,
-  options?: RetryOptions
+  system_prompt_name: string
 ) {
   const contextString = formatContextForPrompt(context);
   const validLinks = extractValidLinks(context);
@@ -444,15 +443,15 @@ export async function* generateChatResponseWithRetry(
   );
 
   try {
-    const stream = await openai.chat.completions.create({
+    const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [systemPrompt, ...messages],
       temperature: 0.7,
       max_tokens: 1500,
-      stream: true,
+      stream: true, // Always stream
     });
 
-    for await (const chunk of stream) {
+    for await (const chunk of response as any) {
       const content = chunk.choices[0]?.delta?.content;
       if (content) {
         yield content;
