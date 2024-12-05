@@ -80,27 +80,6 @@ router.post("/", async (req: any, res) => {
   const teamName = teamData.name;
   const userType = teamData.user_type;
 
-  try {
-    const amplitudeProperties = {
-      team_id: teamId || "unknown",
-      question: decodedQuestion,
-      messages: messages,
-    };
-
-    const amplitudeOptions = {
-      ...(user?.privy_did && { user_id: user.privy_did }),
-      user_properties: { is_anonymous: !user?.privy_did },
-    };
-
-    amplitudeClient.track(
-      "conversation_made",
-      amplitudeProperties,
-      amplitudeOptions
-    );
-  } catch (error) {
-    console.error("Error tracking conversation:", error);
-  }
-
   // Check cache first
   try {
     const cachedResponse = await redis.get(cacheKey);
@@ -172,6 +151,7 @@ router.post("/", async (req: any, res) => {
   );
 
   const codeEmbeddings = codeEmbeddingsQuery.rows;
+  console.log("Code embeddings", codeEmbeddings);
 
   //for each code embedding, ask if it is relevant to the question
   const filterPromises = codeEmbeddings.map((embedding, index) =>
