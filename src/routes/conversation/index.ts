@@ -14,13 +14,11 @@ const router = Router();
 const CACHE_TTL = 3 * 60 * 60;
 const TEAM_CACHE_TTL = 30 * 60;
 
-// Add this helper function before the router.post
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 router.post("/", async (req: any, res) => {
   const question = req.body.question;
   const messages = req.body.messages;
-  const user = req.user;
   const teamId = req.body.teamId as string;
 
   if (!question) {
@@ -29,16 +27,13 @@ router.post("/", async (req: any, res) => {
 
   const decodedQuestion = decodeURIComponent(question as string);
 
-  // Generate cache key using deployment ID and request parameters
   const deploymentId = process.env.RAILWAY_DEPLOYMENT_ID || "local";
   const cacheKey = `conversation:${deploymentId}:${teamId}:${Buffer.from(
     decodedQuestion
   ).toString("base64")}`;
 
-  // Create team cache key
   const teamCacheKey = `team:${teamId}`;
 
-  // Try to get team from cache first
   let teamData;
   try {
     const cachedTeam = await redis.get(teamCacheKey);
@@ -56,7 +51,6 @@ router.post("/", async (req: any, res) => {
 
       teamData = teamQuery.rows[0];
 
-      // Cache the team data
       await redis.set(teamCacheKey, JSON.stringify(teamData), {
         EX: TEAM_CACHE_TTL,
       });
@@ -120,38 +114,43 @@ router.post("/", async (req: any, res) => {
   ].map((pattern) => `%${pattern}%`);
 
   const codeEmbeddingsQuery = await pool.query(
-    `SELECT 
-      content,
-      name,
-      location,
-      type,
-      (embedding <=> $1) * 
+    `WITH ranked_matches AS (
+      SELECT 
+        content,
+        name,
+        location,
+        type,
+        (embedding <=> $1) as similarity
+      FROM context_embeddings 
+      WHERE company_id = $2
+        AND (embedding <=> $1) < 0.8
+      ORDER BY similarity
+      LIMIT 15
+    )
+    SELECT *,
       CASE 
-        WHEN $2 = 'olas' AND LOWER($3) LIKE ANY(ARRAY[${STAKING_PATTERNS.map(
-          (_, i) => `$${i + 4}`
-        ).join(", ")}]) 
-          AND LOWER(content) LIKE '%pearl%' THEN 0.3  -- Boost Pearl content highest
-        WHEN $2 = 'olas' AND LOWER($3) LIKE ANY(ARRAY[${STAKING_PATTERNS.map(
-          (_, i) => `$${i + 4}`
-        ).join(", ")}]) THEN 0.5
-        WHEN LOWER(content) LIKE $3 THEN 0.7
-        WHEN LOWER(name) LIKE $3 THEN 0.8
-        ELSE 1.0
-      END as similarity
-    FROM context_embeddings 
-    WHERE company_id = $2
-    ORDER BY similarity
-    LIMIT 24`,
+        WHEN $2 = 'olas' AND LOWER($3) LIKE ANY($4) AND LOWER(content) LIKE '%pearl%' 
+          THEN similarity * 0.3
+        WHEN $2 = 'olas' AND LOWER($3) LIKE ANY($4) 
+          THEN similarity * 0.5
+        WHEN LOWER(content) LIKE $3 
+          THEN similarity * 0.7
+        WHEN LOWER(name) LIKE $3 
+          THEN similarity * 0.8
+        ELSE similarity
+      END as adjusted_similarity
+    FROM ranked_matches
+    ORDER BY adjusted_similarity
+    `,
     [
       questionEmbedding,
       teamName,
       `%${decodedQuestion.toLowerCase()}%`,
-      ...STAKING_PATTERNS,
+      STAKING_PATTERNS,
     ]
   );
 
-  const codeEmbeddings = codeEmbeddingsQuery.rows;
-  console.log("Code embeddings", codeEmbeddings);
+  const codeEmbeddings = codeEmbeddingsQuery.rows.slice(0, 15);
 
   //for each code embedding, ask if it is relevant to the question
   const filterPromises = codeEmbeddings.map((embedding, index) =>
@@ -239,6 +238,7 @@ ${embedding.content}
 
   try {
     let chunkCount = 0;
+
     for await (const chunk of generateChatResponseWithRetry(
       limitedContext,
       messages,
