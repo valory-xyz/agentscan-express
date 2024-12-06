@@ -58,9 +58,14 @@ export const initializeTelegram = async (
 ): Promise<void> => {
   try {
     telegramClient.on("message", handleTelegramMessage);
-    console.log("Telegram bot initialized");
 
-    await withTimeout(telegramClient.launch(), TIMEOUT_MS);
+    await withTimeout(
+      (async () => {
+        await telegramClient.launch();
+        console.log("Telegram bot successfully initialized!");
+      })(),
+      TIMEOUT_MS
+    );
 
     process.once("SIGINT", () => telegramClient.stop("SIGINT"));
     process.once("SIGTERM", () => telegramClient.stop("SIGTERM"));
