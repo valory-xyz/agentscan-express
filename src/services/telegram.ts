@@ -1,6 +1,7 @@
 import { Context } from "telegraf";
 
 import { generateConversationResponse, getTeamData } from "./conversation";
+import { checkRateLimit } from "../utils/messageLimiter";
 
 const TEAM_ID = "56917ba2-9084-40c3-b9cf-67cd30cc389a";
 
@@ -16,6 +17,24 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
   const isDirectMessage = ctx.chat?.type === "private";
 
   if (!isBotMention && !isDirectMessage) return;
+
+  // Add rate limiting check
+  const userId = ctx.from?.id.toString();
+  if (!userId) return;
+
+  const { limited, ttl } = await checkRateLimit(
+    userId,
+    true // Telegram users are authenticated
+  );
+
+  if (limited) {
+    await ctx.reply(
+      `You've reached the message limit. Please try again in ${Math.ceil(
+        ttl || 0
+      )} seconds.`
+    );
+    return;
+  }
 
   try {
     // Remove bot mention from message

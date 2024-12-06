@@ -1,6 +1,7 @@
 import { Message, Events, ThreadChannel, TextChannel } from "discord.js";
 import { discordClient } from "../initalizers/discord";
 import { generateConversationResponse, getTeamData } from "./conversation";
+import { checkRateLimit } from "../utils/messageLimiter";
 
 const TEAM_ID = "56917ba2-9084-40c3-b9cf-67cd30cc389a";
 const MESSAGE_CHUNK_SIZE = 1900;
@@ -13,6 +14,20 @@ export async function handleMessage(message: Message): Promise<void> {
   if (message.author.bot) return;
 
   if (!allowedChannels.has(message.channelId)) {
+    return;
+  }
+
+  const { limited, ttl } = await checkRateLimit(
+    message.author.id,
+    true // Discord users are authenticated
+  );
+
+  if (limited) {
+    await message.reply(
+      `You've reached the message limit. Please try again in ${Math.ceil(
+        ttl || 0
+      )} seconds.`
+    );
     return;
   }
 
