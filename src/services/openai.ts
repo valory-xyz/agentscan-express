@@ -447,7 +447,7 @@ export async function* generateChatResponseWithRetry(
       model: "gpt-4o-mini",
       messages: [systemPrompt, ...messages],
       temperature: 0.7,
-      max_tokens: 1500,
+      max_tokens: 1250,
       stream: true, // Always stream
     });
 
