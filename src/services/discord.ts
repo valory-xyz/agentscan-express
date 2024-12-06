@@ -3,6 +3,7 @@ import { discordClient } from "../initalizers/discord";
 import { generateConversationResponse, getTeamData } from "./conversation";
 import { checkRateLimit } from "../utils/messageLimiter";
 import { pool } from "../initalizers/postgres";
+import { amplitudeClient } from "../initalizers/amplitude";
 
 const TEAM_ID = "56917ba2-9084-40c3-b9cf-67cd30cc389a";
 
@@ -54,6 +55,17 @@ export async function handleMessage(message: Message): Promise<void> {
     updateConversationHistory(conversationHistory, {
       role: "user",
       content,
+    });
+
+    amplitudeClient.track({
+      event_type: "conversation_made",
+      event_properties: {
+        teamId: TEAM_ID,
+        question: content,
+        source: "discord",
+        messages: conversationHistory,
+      },
+      user_id: message.author.id,
     });
 
     if ("sendTyping" in message.channel) {
@@ -181,6 +193,18 @@ async function streamResponse(
           role: "assistant",
           content: fullResponse,
         });
+
+        amplitudeClient.track({
+          event_type: "conversation_completed",
+          event_properties: {
+            teamId: TEAM_ID,
+            question: message.content,
+            source: "discord",
+            answer: fullResponse,
+          },
+          user_id: message.author.id,
+        });
+
         return;
       }
 
