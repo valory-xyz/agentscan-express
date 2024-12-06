@@ -63,8 +63,11 @@ export async function handleMessage(message: Message): Promise<void> {
     const teamData = await getTeamData(TEAM_ID);
 
     if (message.channel instanceof TextChannel && !message.hasThread) {
+      const threadName =
+        content.length > 50 ? `${content.slice(0, 50)}...` : content;
+
       const thread = await message.startThread({
-        name: `Chat: ${content.slice(0, 50)}...`,
+        name: `Chat: ${threadName}`,
         autoArchiveDuration: 60,
       });
       await streamResponse(message, conversationHistory, teamData, thread);
