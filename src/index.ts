@@ -20,9 +20,6 @@ dotenv.config();
 const app = express();
 const httpServer = createServer(app);
 
-// Middleware
-
-// Increase payload size limit to 10MB (adjust as needed)
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
@@ -30,7 +27,6 @@ app.use(cors());
 
 app.use("/", require("./routes").default);
 
-// Initialize the server
 async function initServer(): Promise<void> {
   amplitudeClient;
   httpServer.listen(config.server.port, () => {
@@ -38,7 +34,6 @@ async function initServer(): Promise<void> {
   });
   await initializeDiscord();
 
-  // Add 30-second delay before initializing Telegram
   await new Promise((resolve) => setTimeout(resolve, 30000));
   console.log("Initializing Telegram bot after 30-second delay...");
   await initializeTelegram();
