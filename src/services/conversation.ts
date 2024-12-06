@@ -125,6 +125,9 @@ export async function findRelevantContext(
     "how to make",
     "how to make an",
     "how to make my own",
+    "set up",
+    "set up agent",
+    "set up my own",
   ].map((pattern) => `%${pattern}%`);
 
   const codeEmbeddings = await fetchCodeEmbeddings(
