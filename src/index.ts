@@ -37,6 +37,10 @@ async function initServer(): Promise<void> {
     console.log(`Server running on port ${config.server.port}`);
   });
   await initializeDiscord();
+
+  // Add 30-second delay before initializing Telegram
+  await new Promise((resolve) => setTimeout(resolve, 30000));
+  console.log("Initializing Telegram bot after 30-second delay...");
   await initializeTelegram();
 }
 
