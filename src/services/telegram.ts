@@ -3,7 +3,6 @@ import { Context } from "telegraf";
 import { generateConversationResponse, getTeamData } from "./conversation";
 
 const TEAM_ID = "56917ba2-9084-40c3-b9cf-67cd30cc389a";
-const ENABLE_TYPING_DELAY = process.env.ENABLE_TYPING_DELAY === "true";
 
 // Store ongoing conversations
 const conversations = new Map<string, any[]>();
@@ -34,7 +33,7 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
       content,
     });
 
-    if (ENABLE_TYPING_DELAY && ctx.chat?.id) {
+    if (ctx.chat?.id) {
       await ctx.telegram.sendChatAction(ctx.chat.id, "typing");
     }
 
@@ -76,7 +75,7 @@ async function streamResponse(
 
   try {
     // Start continuous typing indicator
-    if (ENABLE_TYPING_DELAY && ctx.chat?.id) {
+    if (ctx.chat?.id) {
       typingInterval = setInterval(async () => {
         await ctx.telegram.sendChatAction(ctx.chat!.id, "typing");
       }, 4000);
@@ -86,7 +85,7 @@ async function streamResponse(
       question,
       conversationHistory,
       teamData,
-      !ENABLE_TYPING_DELAY
+      false
     )) {
       if (response.error) {
         clearInterval(typingInterval);
