@@ -75,11 +75,56 @@ export async function findRelevantContext(
     "staking olas",
     "how to stake",
     "easiest way to stake",
+    "want to stake",
+    "can i stake",
+    "help me stake",
+    "guide to staking",
+    "staking guide",
+    "stake my olas",
     "run olas",
     "running olas",
     "how to run",
     "to run",
     "easiest way to run",
+    "want to run",
+    "can i run",
+    "help me run",
+    "guide to running",
+    "run my own",
+    "running guide",
+    "run agent",
+    "running agent",
+    "run an agent",
+    "start agent",
+    "starting agent",
+    "deploy agent",
+    "deploying agent",
+    "non technical",
+    "non technical guide",
+    "easy",
+    "simple way",
+    "beginner",
+    "beginner friendly",
+    "don't know how to code",
+    "no coding",
+    "without coding",
+    "not a developer",
+    "not technical",
+    "simple guide",
+    "step by step",
+    "how can i",
+    "what's the easiest",
+    "what is the easiest",
+    "best way to",
+    "quickest way to",
+    "help with",
+    "where do i start",
+    "getting started",
+    "make my own",
+    "make my own agent",
+    "how to make",
+    "how to make an",
+    "how to make my own",
   ].map((pattern) => `%${pattern}%`);
 
   const codeEmbeddings = await fetchCodeEmbeddings(
@@ -102,28 +147,54 @@ async function fetchCodeEmbeddings(
   decodedQuestion: string,
   stakingPatterns: string[]
 ) {
+  const relevantPatterns = stakingPatterns.filter((pattern) =>
+    decodedQuestion.toLowerCase().includes(pattern.replace(/%/g, ""))
+  );
+
+  if (relevantPatterns.length === 0) {
+    const query = await pool.query(
+      `WITH ranked_matches AS (
+        SELECT content, name, location, type, (embedding <=> $1) as similarity
+        FROM context_embeddings 
+        WHERE company_id = $2 AND (embedding <=> $1) < 0.8
+        ORDER BY similarity
+      )
+      SELECT *,
+        CASE 
+          WHEN LOWER(content) LIKE $3 THEN similarity * 0.7
+          WHEN LOWER(name) LIKE $3 THEN similarity * 0.8
+          ELSE similarity
+        END as adjusted_similarity
+      FROM ranked_matches
+      ORDER BY adjusted_similarity
+        `,
+      [questionEmbedding, teamName, `%${decodedQuestion.toLowerCase()}%`]
+    );
+    return query.rows.slice(0, 15);
+  }
+
   const query = await pool.query(
     `WITH ranked_matches AS (
       SELECT content, name, location, type, (embedding <=> $1) as similarity
       FROM context_embeddings 
       WHERE company_id = $2 AND (embedding <=> $1) < 0.8
-      ORDER BY similarity LIMIT 15
+      ORDER BY similarity
     )
     SELECT *,
       CASE 
-        WHEN $2 = 'olas' AND LOWER($3) LIKE ANY($4) AND LOWER(content) LIKE '%pearl%' THEN similarity * 0.3
-        WHEN $2 = 'olas' AND LOWER($3) LIKE ANY($4) THEN similarity * 0.5
+        WHEN LOWER(content) LIKE '%pearl%' AND LOWER($3) LIKE ANY(SELECT UNNEST($4::text[])) THEN similarity * 0.3
         WHEN LOWER(content) LIKE $3 THEN similarity * 0.7
         WHEN LOWER(name) LIKE $3 THEN similarity * 0.8
         ELSE similarity
       END as adjusted_similarity
     FROM ranked_matches
-    ORDER BY adjusted_similarity`,
+    ORDER BY adjusted_similarity
+    `,
     [
       questionEmbedding,
       teamName,
       `%${decodedQuestion.toLowerCase()}%`,
-      stakingPatterns,
+      relevantPatterns,
     ]
   );
 
@@ -218,7 +289,7 @@ export async function* generateConversationResponse(
     // Check cache
     try {
       const cachedResponse = await redis.get(cacheKey);
-      if (cachedResponse) {
+      if (cachedResponse && deploymentId !== "local") {
         console.log("Cache hit for question:", decodedQuestion);
         const chunks = JSON.parse(cachedResponse);
 
