@@ -1,19 +1,26 @@
-import { Message, Events, ThreadChannel, TextChannel } from "discord.js";
+import { Message, ThreadChannel, TextChannel } from "discord.js";
 import { discordClient } from "../initalizers/discord";
 import { generateConversationResponse, getTeamData } from "./conversation";
 import { checkRateLimit } from "../utils/messageLimiter";
+import { pool } from "../initalizers/postgres";
 
 const TEAM_ID = "56917ba2-9084-40c3-b9cf-67cd30cc389a";
-const MESSAGE_CHUNK_SIZE = 1900;
 
 const conversations = new Map<string, any[]>();
 
-const allowedChannels = new Set<string>();
-
 export async function handleMessage(message: Message): Promise<void> {
-  if (message.author.bot) return;
+  if (message.author.bot) {
+    return;
+  }
 
-  if (!allowedChannels.has(message.channelId)) {
+  const isAllowedChannel =
+    (await isChannelAllowed(message.channelId)) ||
+    (message.channel instanceof ThreadChannel &&
+      message.channel.parentId &&
+      (await isChannelAllowed(message.channel.parentId)));
+
+  if (!isAllowedChannel) {
+    console.log("not allowed channel", message.channelId);
     return;
   }
 
@@ -32,9 +39,18 @@ export async function handleMessage(message: Message): Promise<void> {
   }
 
   const isInThread = message.channel instanceof ThreadChannel;
+
   const isBotMentioned = message.mentions.has(discordClient.user!.id);
 
-  if (!isInThread && !isBotMentioned) {
+  let isThreadCreator = false;
+
+  if (isInThread && message.channel instanceof ThreadChannel) {
+    const starterMessage = await message.channel.fetchStarterMessage();
+
+    isThreadCreator = starterMessage?.author.id === message.author.id;
+  }
+
+  if (!isInThread && !isBotMentioned && !isThreadCreator) {
     return;
   }
 
@@ -166,13 +182,11 @@ async function streamResponse(
 
       fullResponse += response.content;
     }
-  } finally {
-    if (thread && message.channel instanceof TextChannel) {
-      await message.channel.sendTyping().catch(() => {});
-    }
-    if ("sendTyping" in targetChannel) {
-      await targetChannel.sendTyping().catch(() => {});
-    }
+  } catch (error) {
+    console.error("Error in streamResponse:", error);
+    await targetChannel.send(
+      "Sorry, something went wrong while processing your message."
+    );
   }
 }
 
@@ -201,21 +215,49 @@ export async function handleSlashCommand(interaction: any) {
   }
 
   const channelId = interaction.channelId;
+  const serverId = interaction.guildId;
+  const enabledBy = interaction.user.id;
 
   switch (interaction.commandName) {
     case "enable":
-      allowedChannels.add(channelId);
+      await pool.query(
+        `INSERT INTO discord_servers (id) 
+         VALUES ($1) 
+         ON CONFLICT (id) DO NOTHING`,
+        [serverId]
+      );
+
+      await pool.query(
+        `INSERT INTO discord_allowed_channels (channel_id, server_id, enabled_by) 
+         VALUES ($1, $2, $3) 
+         ON CONFLICT (channel_id) DO NOTHING`,
+        [channelId, serverId, enabledBy]
+      );
+
       await interaction.reply({
         content: "Bot enabled in this channel!",
         ephemeral: true,
       });
       break;
+
     case "disable":
-      allowedChannels.delete(channelId);
+      await pool.query(
+        "DELETE FROM discord_allowed_channels WHERE channel_id = $1",
+        [channelId]
+      );
+
       await interaction.reply({
         content: "Bot disabled in this channel!",
         ephemeral: true,
       });
       break;
   }
+}
+
+async function isChannelAllowed(channelId: string): Promise<boolean> {
+  const result = await pool.query(
+    "SELECT 1 FROM discord_allowed_channels WHERE channel_id = $1",
+    [channelId]
+  );
+  return result.rows.length > 0;
 }
