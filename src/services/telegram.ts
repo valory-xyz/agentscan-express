@@ -33,6 +33,17 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
     const userId = ctx.from?.id.toString();
     if (!userId) return;
 
+    const { limited, ttl } = await checkRateLimit(userId, true);
+
+    if (limited) {
+      await ctx.reply(
+        `You've reached the message limit. Please try again in ${Math.ceil(
+          ttl || 0
+        )} seconds.`
+      );
+      return;
+    }
+
     const replyToMessageId = ctx.message.reply_to_message?.message_id;
     const currentMessageId = ctx.message.message_id;
 
