@@ -57,15 +57,23 @@ export async function handleMessage(message: Message): Promise<void> {
       content,
     });
 
+    const userProperties = {
+      username: message.author.username,
+    };
+
     amplitudeClient.track({
       event_type: "conversation_made",
+      user_id: message.author.id,
+      user_properties: userProperties,
       event_properties: {
         teamId: TEAM_ID,
         question: content,
         source: "discord",
         messages: conversationHistory,
+        channel_id: message.channelId,
+        channel_type: message.channel.type,
+        guild_id: message.guildId || "DM",
       },
-      user_id: message.author.id,
     });
 
     if ("sendTyping" in message.channel) {
@@ -152,6 +160,10 @@ async function streamResponse(
   teamData: any,
   thread?: ThreadChannel
 ): Promise<void> {
+  const userProperties = {
+    username: message.author.username,
+  };
+
   const targetChannel = thread || (message.channel as any);
   let fullResponse = "";
   let currentChunk = "";
@@ -196,13 +208,17 @@ async function streamResponse(
 
         amplitudeClient.track({
           event_type: "conversation_completed",
+          user_id: message.author.id,
+          user_properties: userProperties,
           event_properties: {
             teamId: TEAM_ID,
             question: message.content,
             source: "discord",
             answer: fullResponse,
+            channel_id: message.channelId,
+            channel_type: message.channel.type,
+            guild_id: message.guildId || "DM",
           },
-          user_id: message.author.id,
         });
 
         return;
