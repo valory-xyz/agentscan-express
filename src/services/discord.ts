@@ -63,11 +63,18 @@ export async function handleMessage(message: Message): Promise<void> {
     const teamData = await getTeamData(TEAM_ID);
 
     if (message.channel instanceof TextChannel && !message.hasThread) {
+      const cleanContent = message.cleanContent
+        .replace(/@\S+/g, "") // Remove any remaining @ mentions
+        .replace(/\s+/g, " ") // Clean up spaces
+        .trim();
+
       const threadName =
-        content.length > 50 ? `${content.slice(0, 50)}...` : content;
+        cleanContent.length > 50
+          ? `${cleanContent.slice(0, 50)}...`
+          : cleanContent || "New Thread"; // Fallback name if empty
 
       const thread = await message.startThread({
-        name: `Chat: ${threadName}`,
+        name: threadName,
         autoArchiveDuration: 60,
       });
       await streamResponse(message, conversationHistory, teamData, thread);
