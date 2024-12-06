@@ -5,22 +5,23 @@ import { generateConversationResponse, getTeamData } from "./conversation";
 const TEAM_ID = "56917ba2-9084-40c3-b9cf-67cd30cc389a";
 const MESSAGE_CHUNK_SIZE = 1900;
 
-// Store ongoing conversations
 const conversations = new Map<string, any[]>();
 
+const allowedChannels = new Set<string>();
+
 export async function handleMessage(message: Message): Promise<void> {
-  // Ignore bot messages
   if (message.author.bot) return;
 
-  // Check if message is in a thread or mentions the bot
+  if (!allowedChannels.has(message.channelId)) {
+    return;
+  }
+
   const isInThread = message.channel instanceof ThreadChannel;
   const isBotMentioned = message.mentions.has(discordClient.user!.id);
 
-  // Only proceed if message is in a thread or mentions the bot
   if (!isInThread && !isBotMentioned) return;
 
   try {
-    // Remove the bot mention from the message content if present
     const content = message.content.replace(/<@!\d+>|<@\d+>/g, "").trim();
 
     const conversationId =
@@ -67,11 +68,9 @@ export async function loadThreadHistory(
   conversationHistory: any[]
 ): Promise<void> {
   try {
-    // Fetch last 10 messages from thread
     const messages = await thread.messages.fetch({ limit: 10 });
     const orderedMessages = Array.from(messages.values()).reverse();
 
-    // Clear existing history and rebuild from thread
     conversationHistory.length = 0;
 
     for (const msg of orderedMessages) {
@@ -157,5 +156,49 @@ async function streamResponse(
     if ("sendTyping" in targetChannel) {
       await targetChannel.sendTyping().catch(() => {});
     }
+  }
+}
+
+export async function registerCommands(client: any) {
+  const commands = [
+    {
+      name: "enable",
+      description: "Enable bot responses in this channel",
+    },
+    {
+      name: "disable",
+      description: "Disable bot responses in this channel",
+    },
+  ];
+
+  await client.application?.commands.set(commands);
+}
+
+export async function handleSlashCommand(interaction: any) {
+  if (!interaction.memberPermissions?.has("Administrator")) {
+    await interaction.reply({
+      content: "Only administrators can manage bot channels.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const channelId = interaction.channelId;
+
+  switch (interaction.commandName) {
+    case "enable":
+      allowedChannels.add(channelId);
+      await interaction.reply({
+        content: "Bot enabled in this channel!",
+        ephemeral: true,
+      });
+      break;
+    case "disable":
+      allowedChannels.delete(channelId);
+      await interaction.reply({
+        content: "Bot disabled in this channel!",
+        ephemeral: true,
+      });
+      break;
   }
 }

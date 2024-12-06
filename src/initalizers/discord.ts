@@ -1,6 +1,10 @@
 import { Client, Events, GatewayIntentBits } from "discord.js";
 import dotenv from "dotenv";
-import { handleMessage } from "../services/discord";
+import {
+  handleMessage,
+  handleSlashCommand,
+  registerCommands,
+} from "../services/discord";
 
 dotenv.config();
 
@@ -16,7 +20,6 @@ export const discordClient = new Client({
   ],
 });
 
-// Error handling
 discordClient.on("error", (error) => {
   console.error("Discord client error:", error);
 });
@@ -26,11 +29,17 @@ export const initializeDiscord = async (): Promise<void> => {
     await discordClient.login(process.env.DISCORD_BOT_TOKEN);
     console.log(`Discord bot initialized as ${discordClient.user?.tag}`);
 
-    discordClient.once(Events.ClientReady, (readyClient) => {
+    discordClient.once(Events.ClientReady, async (readyClient) => {
       console.log(`Ready! Logged in as ${readyClient.user.tag}`);
+      await registerCommands(discordClient);
     });
 
     discordClient.on(Events.MessageCreate, handleMessage);
+
+    discordClient.on(Events.InteractionCreate, async (interaction) => {
+      if (!interaction.isCommand()) return;
+      await handleSlashCommand(interaction);
+    });
 
     discordClient.on(Events.ThreadCreate, async (thread) => {
       if (thread.joinable) await thread.join();
