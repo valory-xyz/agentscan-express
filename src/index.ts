@@ -33,11 +33,11 @@ app.use("/", require("./routes").default);
 // Initialize the server
 async function initServer(): Promise<void> {
   amplitudeClient;
-  await initializeDiscord();
-  await initializeTelegram();
   httpServer.listen(config.server.port, () => {
     console.log(`Server running on port ${config.server.port}`);
   });
+  await initializeDiscord();
+  await initializeTelegram();
 }
 
 initServer().catch(console.error);
