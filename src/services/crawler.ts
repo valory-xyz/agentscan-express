@@ -15,6 +15,7 @@ import * as base64 from "base-64";
 import pgvector from "pgvector";
 import { YoutubeTranscript } from "youtube-transcript";
 import { google } from "googleapis";
+import { JSDOM } from "jsdom";
 
 // Simplify the status enum
 enum ProcessingStatus {
@@ -59,6 +60,12 @@ const TIMEOUTS = {
 const CRAWL_TIMEOUTS = {
   BATCH_PROCESSING: 300000, // 3 minutes per batch
   SINGLE_URL_CRAWL: 60000, // 1 minute per URL
+};
+
+// Add X-related constants
+const X_TIMEOUTS = {
+  SCRAPE: 30000, // 30 seconds for scraping X post
+  PROCESS: 45000, // 45 seconds for processing content
 };
 
 // Add a reusable retry utility
@@ -310,6 +317,14 @@ function isValidUrl(url: string): boolean {
 
     // Add YouTube URL detection
     if (url.includes("youtube.com/watch?v=") || url.includes("youtu.be/")) {
+      return true;
+    }
+
+    // Add X.com and Twitter.com URL detection
+    if (
+      (url.includes("twitter.com/") || url.includes("x.com/")) &&
+      url.includes("/status/")
+    ) {
       return true;
     }
 
@@ -569,6 +584,20 @@ async function scrape_website(
   let page: any = null;
 
   try {
+    // Handle X/Twitter posts
+    if (
+      (url.includes("twitter.com") || url.includes("x.com")) &&
+      url.includes("/status/")
+    ) {
+      console.log(`Detected X post URL: ${url}`);
+      const { content, title } = await scrapeXPost(url);
+      return {
+        bodyText: content,
+        links: [],
+        title: title || url,
+      };
+    }
+
     // Handle YouTube case first
     if (url.includes("youtube.com/watch?v=") || url.includes("youtu.be/")) {
       console.log(`Detected YouTube URL: ${url}`);
@@ -1163,7 +1192,7 @@ async function processGithubRepo(
   }
 }
 
-// Update crawl_website to handle GitHub repositories
+// Update crawl_website to handle X posts without recursion
 export async function crawl_website(
   base_url: string,
   max_depth: number = 7,
@@ -1171,6 +1200,17 @@ export async function crawl_website(
   currentDepth: number = 0
 ) {
   try {
+    // Handle X/Twitter posts first and return immediately
+    if (base_url.includes("x.com") || base_url.includes("twitter.com")) {
+      //get the username from the url
+      const username = base_url.split("/").pop();
+      if (username) {
+        await processXAccount(username, organization_id);
+      }
+      // Return empty array to prevent further crawling
+      return [];
+    }
+
     // Add GitHub repository handling
     if (
       base_url.startsWith("https://github.com/") &&
@@ -1470,6 +1510,8 @@ async function processDocument(
         ? "video"
         : url.includes("github.com")
         ? "code"
+        : url.includes("x.com") || url.includes("twitter.com")
+        ? "x"
         : "document";
 
     // For YouTube videos, format content with title prefix
@@ -1606,21 +1648,6 @@ async function processDocument(
   }
 }
 
-// Add this new function after the downloadAndProcessPdf function
-async function getYoutubeVideoId(url: string): Promise<string | null> {
-  try {
-    const urlObj = new URL(url);
-    if (urlObj.hostname.includes("youtube.com")) {
-      return urlObj.searchParams.get("v");
-    } else if (urlObj.hostname === "youtu.be") {
-      return urlObj.pathname.slice(1);
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 // Add this new function after filter_content
 async function filter_youtube_content(transcript: string) {
   try {
@@ -1686,5 +1713,378 @@ async function filter_youtube_content(transcript: string) {
   } catch (error) {
     console.error("Fatal error in filter_youtube_content:", error);
     return null;
+  }
+}
+
+// Add X post scraping function
+async function scrapeXPost(
+  url: string
+): Promise<{ content: string; title: string | null }> {
+  let browser = null;
+  let page = null;
+
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+
+    const context = await browser.newContext({
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    });
+
+    page = await context.newPage();
+    await page.setDefaultTimeout(X_TIMEOUTS.SCRAPE);
+
+    console.log(`Navigating to X post: ${url}`);
+    await page.goto(url, { waitUntil: "networkidle" });
+
+    // Wait for the tweet content to load
+    await page.waitForSelector('article[data-testid="tweet"]', {
+      timeout: X_TIMEOUTS.SCRAPE,
+    });
+
+    const content = await page.evaluate(() => {
+      const article = document.querySelector('article[data-testid="tweet"]');
+      if (!article) return null;
+
+      // Get all text content, including thread if present
+      const tweetTextElements = article.querySelectorAll(
+        '[data-testid="tweetText"]'
+      );
+      const tweetTexts = Array.from(tweetTextElements).map(
+        (el) => el.textContent || ""
+      );
+
+      // Get title/heading if present (usually in larger text)
+      const possibleHeadings = Array.from(
+        article.querySelectorAll("span")
+      ).filter(
+        (span) =>
+          span.style.fontSize === "23px" || span.style.fontSize === "20px"
+      );
+      const title =
+        possibleHeadings.length > 0 ? possibleHeadings[0].textContent : "";
+
+      // Get bullet points if present
+      const bulletPoints = Array.from(article.querySelectorAll("ul li")).map(
+        (li) => li.textContent
+      );
+
+      const author =
+        article.querySelector('[data-testid="User-Name"]')?.textContent ||
+        "Unknown Author";
+      const timestamp =
+        article.querySelector("time")?.getAttribute("datetime") || "";
+
+      // Get image alt text if present
+      const images = Array.from(article.querySelectorAll("img"))
+        .filter(
+          (img) => !img.src.includes("profile") && !img.src.includes("avatar")
+        )
+        .map((img) => img.alt)
+        .filter((alt) => alt && !alt.includes("Image"));
+
+      return {
+        text: tweetTexts.join("\n"),
+        title,
+        bulletPoints,
+        author: author.trim(),
+        timestamp,
+        imageDescriptions: images,
+      };
+    });
+
+    if (!content) {
+      throw new Error("Failed to extract tweet content");
+    }
+
+    // Format the content in a structured way
+    let formattedContent = `Author: ${content.author}\nURL: ${url}\nTimestamp: ${content.timestamp}\n\n`;
+
+    if (content.title) {
+      formattedContent += `Title: ${content.title}\n\n`;
+    }
+
+    formattedContent += `Content:\n${content.text}\n`;
+
+    if (content.bulletPoints && content.bulletPoints.length > 0) {
+      formattedContent += "\nKey Points:\n";
+      content.bulletPoints.forEach((point) => {
+        formattedContent += `• ${point}\n`;
+      });
+    }
+
+    if (content.imageDescriptions && content.imageDescriptions.length > 0) {
+      formattedContent += "\nImages:\n";
+      content.imageDescriptions.forEach((desc) => {
+        formattedContent += `- ${desc}\n`;
+      });
+    }
+
+    console.log(`Successfully scraped X post from ${content.author}`);
+    console.log(formattedContent);
+
+    return {
+      content: formattedContent.trim(),
+      title: content.title || `X Post by ${content.author}`,
+    };
+  } catch (error) {
+    console.error("Error scraping X post:", error);
+    throw error;
+  } finally {
+    if (page) await page.close().catch(console.error);
+    if (browser) await browser.close().catch(console.error);
+  }
+}
+
+// Add these new interfaces at the top with other interfaces
+interface XAccountPost {
+  id: string;
+  content: string;
+  timestamp: string;
+  url: string;
+  title?: string;
+}
+
+interface XAccountScrapeResult {
+  posts: XAccountPost[];
+  username: string;
+  error?: string;
+}
+
+// Add this new function
+async function scrapeXAccount(
+  username: string,
+  maxPosts: number = 1000
+): Promise<XAccountScrapeResult> {
+  let browser = null;
+  let page = null;
+
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+
+    const context = await browser.newContext({
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+      viewport: { width: 1280, height: 800 },
+    });
+
+    page = await context.newPage();
+
+    // Clean username (remove @ if present)
+    const cleanUsername = username.replace("@", "");
+    const url = `https://x.com/${cleanUsername}`;
+
+    console.log(`Navigating to X profile: ${url}`);
+    await page.goto(url, { waitUntil: "networkidle" });
+
+    // Wait for the timeline to load
+    await page.waitForSelector('article[data-testid="tweet"]', {
+      timeout: 30000,
+    });
+
+    const posts: XAccountPost[] = [];
+    let lastHeight = 0;
+    let noNewPostsCount = 0;
+    const maxScrollAttempts = 50; // Increase scroll attempts
+    let scrollAttempts = 0;
+
+    while (posts.length < maxPosts && scrollAttempts < maxScrollAttempts) {
+      scrollAttempts++;
+
+      // Extract posts currently visible
+      const newPosts = await page.evaluate((username) => {
+        return Array.from(
+          document.querySelectorAll('article[data-testid="tweet"]')
+        )
+          .map((article) => {
+            const link =
+              article
+                .querySelector('a[href*="/status/"]')
+                ?.getAttribute("href") || "";
+
+            // Only process if it's a valid tweet URL AND it's from the target user
+            if (
+              !link ||
+              !link.includes("/status/") ||
+              !link.startsWith(`/${username}`)
+            ) {
+              return null;
+            }
+
+            const tweetText =
+              article.querySelector('[data-testid="tweetText"]')?.textContent ||
+              "";
+            const timestamp =
+              article.querySelector("time")?.getAttribute("datetime") || "";
+            const id = link.split("/status/")[1] || "";
+
+            const possibleHeadings = Array.from(
+              article.querySelectorAll("span")
+            ).filter(
+              (span) =>
+                span.style.fontSize === "23px" || span.style.fontSize === "20px"
+            );
+            const title =
+              possibleHeadings.length > 0
+                ? possibleHeadings[0].textContent
+                : undefined;
+
+            return {
+              id,
+              content: tweetText,
+              timestamp,
+              url: `https://x.com${link}`,
+              title: title || undefined,
+            };
+          })
+          .filter((post) => post !== null);
+      }, cleanUsername);
+
+      // Track how many new posts we found
+      const initialPostCount = posts.length;
+
+      // Add new unique posts
+      for (const post of newPosts) {
+        if (!posts.some((p) => p.id === post.id) && post.id) {
+          posts.push(post);
+        }
+      }
+
+      // Check if we found any new posts
+      if (posts.length === initialPostCount) {
+        noNewPostsCount++;
+        if (noNewPostsCount >= 5) {
+          // If no new posts found after 5 attempts, break
+          console.log("No new posts found after multiple scroll attempts");
+          break;
+        }
+      } else {
+        noNewPostsCount = 0; // Reset counter if we found new posts
+      }
+
+      console.log(`Found ${posts.length} posts so far...`);
+      //preview the last post
+      console.log(posts[posts.length - 1].content);
+
+      // Scroll down with a more reliable method
+      await page.evaluate(() => {
+        const distance = 800; // Scroll by 800px each time
+        window.scrollBy(0, distance);
+      });
+
+      // Add a longer wait time for content to load
+      await page.waitForTimeout(2000);
+
+      // Check if we've reached the bottom
+      const newHeight = await page.evaluate(() => document.body.scrollHeight);
+      if (newHeight === lastHeight) {
+        noNewPostsCount++;
+        if (noNewPostsCount >= 5) {
+          console.log("Reached bottom of page");
+          break;
+        }
+      }
+      lastHeight = newHeight;
+    }
+
+    console.log(`Finished scraping with ${posts.length} posts collected`);
+    return {
+      posts: posts.slice(0, maxPosts),
+      username: cleanUsername,
+    };
+  } catch (error: any) {
+    console.error("Error scraping X account:", error);
+    return {
+      posts: [],
+      username: username,
+      error: error?.message,
+    };
+  } finally {
+    if (page) await page.close().catch(console.error);
+    if (browser) await browser.close().catch(console.error);
+  }
+}
+
+// Add this function to process an account's posts
+export async function processXAccount(
+  username: string,
+  organization_id: string,
+  maxPosts: number = 1000
+): Promise<boolean> {
+  try {
+    console.log(`Processing X account: ${username}`);
+    const result = await scrapeXAccount(username, maxPosts);
+    console.log(`Scraped ${result.posts.length} posts from ${username}`);
+
+    if (result.error || result.posts.length === 0) {
+      console.error(`Failed to scrape X account ${username}:`, result.error);
+      return false;
+    }
+
+    // Process each post
+    const processPromises = result.posts.map(async (post) => {
+      const urlId = crypto.createHash("sha256").update(post.url).digest("hex");
+
+      try {
+        await updateProcessingStatus(
+          urlId,
+          post.url,
+          ProcessingStatus.PROCESSING,
+          organization_id,
+          undefined,
+          "document"
+        );
+
+        // Get full post content using existing scrapeXPost
+        const { content, title } = await scrapeXPost(post.url);
+
+        if (content) {
+          await processDocument(
+            post.url,
+            content,
+            organization_id,
+            title || undefined
+          );
+          await updateProcessingStatus(
+            urlId,
+            post.url,
+            ProcessingStatus.COMPLETED,
+            organization_id,
+            undefined,
+            "document"
+          );
+          return true;
+        }
+        return false;
+      } catch (error: any) {
+        console.error(`Error processing X post ${post.url}:`, error);
+        await updateProcessingStatus(
+          urlId,
+          post.url,
+          ProcessingStatus.FAILED,
+          organization_id,
+          error?.message,
+          "document"
+        );
+        return false;
+      }
+    });
+
+    const results = await Promise.all(processPromises);
+    const successCount = results.filter(Boolean).length;
+
+    console.log(
+      `Processed ${successCount}/${result.posts.length} posts from ${username}`
+    );
+    return successCount > 0;
+  } catch (error) {
+    console.error(`Error processing X account ${username}:`, error);
+    return false;
   }
 }
