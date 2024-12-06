@@ -34,7 +34,9 @@ export async function handleMessage(message: Message): Promise<void> {
   const isInThread = message.channel instanceof ThreadChannel;
   const isBotMentioned = message.mentions.has(discordClient.user!.id);
 
-  if (!isInThread && !isBotMentioned) return;
+  if (!isInThread && !isBotMentioned) {
+    return;
+  }
 
   try {
     const content = message.content.replace(/<@!\d+>|<@\d+>/g, "").trim();
