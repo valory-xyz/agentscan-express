@@ -118,28 +118,44 @@ async function streamResponse(
   const targetChannel = thread || (message.channel as any);
   let fullResponse = "";
 
-  for await (const response of generateConversationResponse(
-    message.content,
-    conversationHistory,
-    teamData,
-    false
-  )) {
-    if (response.error) {
-      await targetChannel.send(
-        "Sorry, I encountered an error while processing your request."
-      );
-      return;
-    }
+  if (thread && "sendTyping" in message.channel) {
+    await message.channel.sendTyping();
+  }
+  if ("sendTyping" in targetChannel) {
+    await targetChannel.sendTyping();
+  }
 
-    if (response.done) {
-      updateConversationHistory(conversationHistory, {
-        role: "assistant",
-        content: fullResponse,
-      });
-      await targetChannel.send(fullResponse);
-      return;
-    }
+  try {
+    for await (const response of generateConversationResponse(
+      message.content,
+      conversationHistory,
+      teamData,
+      false
+    )) {
+      if (response.error) {
+        await targetChannel.send(
+          "Sorry, I encountered an error while processing your request."
+        );
+        return;
+      }
 
-    fullResponse += response.content;
+      if (response.done) {
+        updateConversationHistory(conversationHistory, {
+          role: "assistant",
+          content: fullResponse,
+        });
+        await targetChannel.send(fullResponse);
+        return;
+      }
+
+      fullResponse += response.content;
+    }
+  } finally {
+    if (thread && message.channel instanceof TextChannel) {
+      await message.channel.sendTyping().catch(() => {});
+    }
+    if ("sendTyping" in targetChannel) {
+      await targetChannel.sendTyping().catch(() => {});
+    }
   }
 }

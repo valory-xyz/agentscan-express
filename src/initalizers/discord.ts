@@ -21,20 +21,17 @@ discordClient.on("error", (error) => {
   console.error("Discord client error:", error);
 });
 
-// Initialize Discord client
 export const initializeDiscord = async (): Promise<void> => {
   try {
     await discordClient.login(process.env.DISCORD_BOT_TOKEN);
     console.log(`Discord bot initialized as ${discordClient.user?.tag}`);
 
-    // Initialize bot handlers
     discordClient.once(Events.ClientReady, (readyClient) => {
       console.log(`Ready! Logged in as ${readyClient.user.tag}`);
     });
 
     discordClient.on(Events.MessageCreate, handleMessage);
 
-    // Handle thread creation
     discordClient.on(Events.ThreadCreate, async (thread) => {
       if (thread.joinable) await thread.join();
     });
