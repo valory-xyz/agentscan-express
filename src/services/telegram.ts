@@ -57,7 +57,13 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
     }
 
     const teamData = await getTeamData(TEAM_ID);
-    await streamResponse(ctx, content, conversationHistory, teamData);
+    await streamResponse(
+      ctx,
+      content,
+      conversationHistory,
+      teamData,
+      ctx.message.message_id
+    );
   } catch (error) {
     console.error("Error handling message:", error);
     await ctx.reply(
@@ -87,7 +93,8 @@ async function streamResponse(
   ctx: Context,
   question: string,
   conversationHistory: any[],
-  teamData: any
+  teamData: any,
+  replyToMessageId?: number
 ): Promise<void> {
   let fullResponse = "";
   let typingInterval: NodeJS.Timeout | undefined;
@@ -108,8 +115,14 @@ async function streamResponse(
     )) {
       if (response.error) {
         clearInterval(typingInterval);
-        await ctx.reply(
-          "Sorry, I encountered an error while processing your request."
+        await ctx.telegram.sendMessage(
+          ctx.chat!.id,
+          "Sorry, I encountered an error while processing your request.",
+          {
+            reply_parameters: {
+              message_id: replyToMessageId ?? ctx.message?.message_id ?? 0,
+            },
+          }
         );
         return;
       }
@@ -120,7 +133,11 @@ async function streamResponse(
           role: "assistant",
           content: fullResponse,
         });
-        await ctx.reply(fullResponse);
+        await ctx.reply(fullResponse, {
+          reply_parameters: {
+            message_id: replyToMessageId ?? ctx.message?.message_id ?? 0,
+          },
+        });
         return;
       }
 
@@ -130,7 +147,12 @@ async function streamResponse(
     clearInterval(typingInterval);
     console.error("Error in stream response:", error);
     await ctx.reply(
-      "Sorry, something went wrong while generating the response."
+      "Sorry, something went wrong while generating the response.",
+      {
+        reply_parameters: {
+          message_id: replyToMessageId ?? ctx.message?.message_id ?? 0,
+        },
+      }
     );
   }
 }
