@@ -142,6 +142,8 @@ async function streamResponse(
 ): Promise<void> {
   const targetChannel = thread || (message.channel as any);
   let fullResponse = "";
+  let currentChunk = "";
+  let lastMessage: Message | null = null;
 
   if (thread && "sendTyping" in message.channel) {
     await message.channel.sendTyping();
@@ -165,15 +167,40 @@ async function streamResponse(
       }
 
       if (response.done) {
+        // Send any remaining content
+        if (currentChunk) {
+          lastMessage = await targetChannel.send({
+            content: currentChunk,
+            reply: lastMessage
+              ? { messageReference: lastMessage.id }
+              : undefined,
+          });
+        }
+
         updateConversationHistory(conversationHistory, {
           role: "assistant",
           content: fullResponse,
         });
-        await targetChannel.send(fullResponse);
         return;
       }
 
       fullResponse += response.content;
+      currentChunk += response.content;
+
+      // If current chunk exceeds 1900 characters (leaving some buffer), send it
+      if (currentChunk.length >= 1900) {
+        // Find the last space to break at
+        const lastSpace = currentChunk.lastIndexOf(" ", 1900);
+        const sendChunk = currentChunk.slice(0, lastSpace);
+
+        lastMessage = await targetChannel.send({
+          content: sendChunk,
+          reply: lastMessage ? { messageReference: lastMessage.id } : undefined,
+        });
+
+        // Keep the remainder for the next chunk
+        currentChunk = currentChunk.slice(lastSpace + 1);
+      }
     }
   } catch (error) {
     console.error("Error in streamResponse:", error);
