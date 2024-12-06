@@ -9,9 +9,10 @@ const TEAM_ID = "56917ba2-9084-40c3-b9cf-67cd30cc389a";
 const conversations = new Map<string, any[]>();
 
 export async function handleMessage(message: Message): Promise<void> {
-  if (message.author.bot) {
-    return;
-  }
+  if (message.author.bot) return;
+
+  const isBotMentioned = message.mentions.has(discordClient.user!.id);
+  if (!isBotMentioned) return;
 
   const isAllowedChannel =
     (await isChannelAllowed(message.channelId)) ||
@@ -24,10 +25,7 @@ export async function handleMessage(message: Message): Promise<void> {
     return;
   }
 
-  const { limited, ttl } = await checkRateLimit(
-    message.author.id,
-    true // Discord users are authenticated
-  );
+  const { limited, ttl } = await checkRateLimit(message.author.id, true);
 
   if (limited) {
     await message.reply(
@@ -38,25 +36,8 @@ export async function handleMessage(message: Message): Promise<void> {
     return;
   }
 
-  const isInThread = message.channel instanceof ThreadChannel;
-
-  const isBotMentioned = message.mentions.has(discordClient.user!.id);
-
-  let isThreadCreator = false;
-
-  if (isInThread && message.channel instanceof ThreadChannel) {
-    const starterMessage = await message.channel.fetchStarterMessage();
-
-    isThreadCreator = starterMessage?.author.id === message.author.id;
-  }
-
-  if (!isInThread && !isBotMentioned && !isThreadCreator) {
-    return;
-  }
-
   try {
     const content = message.content.replace(/<@!\d+>|<@\d+>/g, "").trim();
-
     const conversationId =
       message.channel instanceof ThreadChannel
         ? message.channel.id
@@ -64,8 +45,10 @@ export async function handleMessage(message: Message): Promise<void> {
 
     const conversationHistory = getOrCreateConversation(conversationId);
 
-    if (isInThread) {
+    if (message.channel instanceof ThreadChannel) {
       await loadThreadHistory(message.channel, conversationHistory);
+    } else {
+      conversationHistory.length = 0;
     }
 
     updateConversationHistory(conversationHistory, {
