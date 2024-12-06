@@ -5,52 +5,48 @@ import { checkRateLimit } from "../utils/messageLimiter";
 
 const TEAM_ID = "56917ba2-9084-40c3-b9cf-67cd30cc389a";
 
-// Store ongoing conversations
-const conversations = new Map<string, any[]>();
+const threadContexts = new Map<number, any[]>();
+
+function formatThreadContextForAI(threadContext: any[]): any[] {
+  return threadContext.map((msg) => ({
+    role: msg.from?.is_bot ? "assistant" : "user",
+    content: msg.text?.replace(/@\w+/g, "").trim() || "",
+  }));
+}
 
 export async function handleTelegramMessage(ctx: Context): Promise<void> {
-  // Ignore messages without text
-  if (!ctx.message || !("text" in ctx.message)) return;
-
-  // Only respond to messages that mention the bot or are direct messages
-  const isBotMention = ctx.message.text.includes(`@${ctx.botInfo.username}`);
-  const isDirectMessage = ctx.chat?.type === "private";
-
-  if (!isBotMention && !isDirectMessage) return;
-
-  // Add rate limiting check
-  const userId = ctx.from?.id.toString();
-  if (!userId) return;
-
-  const { limited, ttl } = await checkRateLimit(
-    userId,
-    true // Telegram users are authenticated
-  );
-
-  if (limited) {
-    await ctx.reply(
-      `You've reached the message limit. Please try again in ${Math.ceil(
-        ttl || 0
-      )} seconds.`
-    );
-    return;
-  }
-
   try {
-    // Remove bot mention from message
-    const content = ctx.message.text
-      .replace(`@${ctx.botInfo.username}`, "")
-      .trim();
-    const conversationId = ctx.chat?.id.toString();
+    if (!ctx.botInfo) {
+      console.error("Bot not properly initialized");
+      return;
+    }
 
-    if (!conversationId) return;
+    if (!ctx.message || !("text" in ctx.message)) {
+      return;
+    }
 
-    const conversationHistory = getOrCreateConversation(conversationId);
+    const isPrivateChat = ctx.chat?.type === "private";
+    const isBotMention = ctx.message.text.includes(`@${ctx.botInfo.username}`);
 
-    updateConversationHistory(conversationHistory, {
-      role: "user",
-      content,
-    });
+    if (!isPrivateChat && !isBotMention) return;
+
+    const userId = ctx.from?.id.toString();
+    if (!userId) return;
+
+    const replyToMessageId = ctx.message.reply_to_message?.message_id;
+    const currentMessageId = ctx.message.message_id;
+
+    let threadContext: any[] = [];
+
+    if (replyToMessageId) {
+      threadContext = threadContexts.get(replyToMessageId) || [];
+    }
+
+    threadContext.push(ctx.message);
+
+    threadContexts.set(currentMessageId, threadContext);
+
+    const formattedContext = formatThreadContextForAI(threadContext);
 
     if (ctx.chat?.id) {
       await ctx.telegram.sendChatAction(ctx.chat.id, "typing");
@@ -59,33 +55,21 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
     const teamData = await getTeamData(TEAM_ID);
     await streamResponse(
       ctx,
-      content,
-      conversationHistory,
+      ctx.message.text.replace(`@${ctx.botInfo.username}`, "").trim(),
+      formattedContext,
       teamData,
-      ctx.message.message_id
+      threadContext,
+      replyToMessageId
     );
   } catch (error) {
     console.error("Error handling message:", error);
-    await ctx.reply(
-      "Sorry, something went wrong while processing your message."
-    );
-  }
-}
-
-function getOrCreateConversation(conversationId: string): any[] {
-  if (!conversations.has(conversationId)) {
-    conversations.set(conversationId, []);
-  }
-  return conversations.get(conversationId)!;
-}
-
-function updateConversationHistory(
-  history: any[],
-  message: { role: string; content: string }
-): void {
-  history.push(message);
-  if (history.length > 10) {
-    history.splice(0, history.length - 10);
+    try {
+      await ctx.reply(
+        "Sorry, something went wrong while processing your message."
+      );
+    } catch (replyError) {
+      console.error("Failed to send error message:", replyError);
+    }
   }
 }
 
@@ -94,13 +78,13 @@ async function streamResponse(
   question: string,
   conversationHistory: any[],
   teamData: any,
+  threadContext: any[],
   replyToMessageId?: number
 ): Promise<void> {
   let fullResponse = "";
   let typingInterval: NodeJS.Timeout | undefined;
 
   try {
-    // Start continuous typing indicator
     if (ctx.chat?.id) {
       typingInterval = setInterval(async () => {
         await ctx.telegram.sendChatAction(ctx.chat!.id, "typing");
@@ -129,15 +113,25 @@ async function streamResponse(
 
       if (response.done) {
         clearInterval(typingInterval);
-        updateConversationHistory(conversationHistory, {
-          role: "assistant",
-          content: fullResponse,
-        });
-        await ctx.reply(fullResponse, {
+
+        const sentMessage = await ctx.reply(fullResponse, {
           reply_parameters: {
             message_id: replyToMessageId ?? ctx.message?.message_id ?? 0,
           },
         });
+
+        if (sentMessage) {
+          const updatedContext = [
+            ...threadContext,
+            {
+              text: fullResponse,
+              from: { ...ctx.botInfo, is_bot: true },
+            },
+          ];
+
+          threadContexts.set(sentMessage.message_id, updatedContext);
+        }
+
         return;
       }
 

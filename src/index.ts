@@ -34,9 +34,12 @@ async function initServer(): Promise<void> {
   });
   await initializeDiscord();
 
-  await new Promise((resolve) => setTimeout(resolve, 30000));
-  console.log("Initializing Telegram bot after 30-second delay...");
-  await initializeTelegram();
+  try {
+    await initializeTelegram();
+    console.log("Telegram initialization completed successfully");
+  } catch (error) {
+    console.error("Failed to initialize Telegram:", error);
+  }
 }
 
 initServer().catch(console.error);
