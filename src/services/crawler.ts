@@ -619,11 +619,10 @@ async function scrape_website(
       url.includes("/status/")
     ) {
       console.log(`Detected X post URL: ${url}`);
-      const { content, title } = await scrapeXPost(url);
+      const { content } = await scrapeXPost(url);
       return {
         bodyText: content,
         links: [],
-        title: title || url,
       };
     }
 
@@ -1234,14 +1233,9 @@ export async function crawl_website(
       if (base_url.includes("/status/")) {
         // This is a single tweet URL
         console.log(`Processing single X post: ${base_url}`);
-        const { content, title } = await scrapeXPost(base_url);
+        const { content } = await scrapeXPost(base_url);
         if (content) {
-          await processDocument(
-            base_url,
-            content,
-            organization_id,
-            title || undefined
-          );
+          await processDocument(base_url, content, organization_id);
         }
       } else {
         // This is a user profile URL
@@ -1762,13 +1756,12 @@ async function filter_youtube_content(transcript: string) {
 
 async function scrapeXPost(
   url: string
-): Promise<{ content: string; title: string | null }> {
+): Promise<{ content: string; title: null }> {
   let browser = null;
   let page = null;
 
   try {
     browser = await getBrowser();
-
     const context = await browser.newContext({
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -1780,7 +1773,6 @@ async function scrapeXPost(
     console.log(`Navigating to X post: ${url}`);
     await page.goto(url, { waitUntil: "networkidle" });
 
-    // Wait for the tweet content to load
     await page.waitForSelector('article[data-testid="tweet"]', {
       timeout: X_TIMEOUTS.SCRAPE,
     });
@@ -1789,93 +1781,27 @@ async function scrapeXPost(
       const article = document.querySelector('article[data-testid="tweet"]');
       if (!article) return null;
 
-      // Get all text content, including thread if present
       const tweetTextElements = article.querySelectorAll(
         '[data-testid="tweetText"]'
       );
-      const tweetTexts = Array.from(tweetTextElements).map(
-        (el) => el.textContent || ""
-      );
-
-      // Get title/heading if present (usually in larger text)
-      const possibleHeadings = Array.from(
-        article.querySelectorAll("span")
-      ).filter(
-        (span) =>
-          span.style.fontSize === "23px" || span.style.fontSize === "20px"
-      );
-      const title =
-        possibleHeadings.length > 0 ? possibleHeadings[0].textContent : "";
-
-      // Get bullet points if present
-      const bulletPoints = Array.from(article.querySelectorAll("ul li")).map(
-        (li) => li.textContent
-      );
-
-      const author =
-        article.querySelector('[data-testid="User-Name"]')?.textContent ||
-        "Unknown Author";
-      const timestamp =
-        article.querySelector("time")?.getAttribute("datetime") || "";
-
-      // Get image alt text if present
-      const images = Array.from(article.querySelectorAll("img"))
-        .filter(
-          (img) => !img.src.includes("profile") && !img.src.includes("avatar")
-        )
-        .map((img) => img.alt)
-        .filter((alt) => alt && !alt.includes("Image"));
-
-      return {
-        text: tweetTexts.join("\n"),
-        title,
-        bulletPoints,
-        author: author.trim(),
-        timestamp,
-        imageDescriptions: images,
-      };
+      return Array.from(tweetTextElements)
+        .map((el) => el.textContent || "")
+        .join("\n");
     });
 
     if (!content) {
       throw new Error("Failed to extract tweet content");
     }
 
-    // Format the content in a structured way
-    let formattedContent = `Author: ${content.author}\nURL: ${url}\nTimestamp: ${content.timestamp}\n\n`;
-
-    if (content.title) {
-      formattedContent += `Title: ${content.title}\n\n`;
-    }
-
-    formattedContent += `Content:\n${content.text}\n`;
-
-    if (content.bulletPoints && content.bulletPoints.length > 0) {
-      formattedContent += "\nKey Points:\n";
-      content.bulletPoints.forEach((point) => {
-        formattedContent += `• ${point}\n`;
-      });
-    }
-
-    if (content.imageDescriptions && content.imageDescriptions.length > 0) {
-      formattedContent += "\nImages:\n";
-      content.imageDescriptions.forEach((desc) => {
-        formattedContent += `- ${desc}\n`;
-      });
-    }
-
-    console.log(`Successfully scraped X post from ${content.author}`);
-    console.log(formattedContent);
-
     return {
-      content: formattedContent.trim(),
-      title: content.title || `X Post by ${content.author}`,
+      content: content.trim(),
+      title: null,
     };
   } catch (error) {
     console.error("Error scraping X post:", error);
     throw error;
   } finally {
     if (page) await page.close().catch(console.error);
-    // Don't close browser here, let it be managed by getBrowser
   }
 }
 
@@ -2096,15 +2022,10 @@ export async function processXAccount(
           );
 
           // Get full post content using existing scrapeXPost
-          const { content, title } = await scrapeXPost(post.url);
+          const { content } = await scrapeXPost(post.url);
 
           if (content) {
-            await processDocument(
-              post.url,
-              content,
-              organization_id,
-              title || undefined
-            );
+            await processDocument(post.url, content, organization_id);
             await updateProcessingStatus(
               urlId,
               post.url,
