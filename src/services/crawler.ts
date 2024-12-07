@@ -1773,28 +1773,56 @@ async function scrapeXPost(
     console.log(`Navigating to X post: ${url}`);
     await page.goto(url, { waitUntil: "networkidle" });
 
-    await page.waitForSelector('article[data-testid="tweet"]', {
-      timeout: X_TIMEOUTS.SCRAPE,
-    });
+    // Wait for any of these selectors to be available
+    const possibleSelectors = [
+      'article[data-testid="tweet"]',
+      '[data-testid="tweetText"]',
+      ".css-1dbjc4n[lang]", // Alternative selector for tweet content
+      'div[data-testid="tweet"] div[lang]', // Another alternative
+    ];
 
-    const content = await page.evaluate(() => {
-      const article = document.querySelector('article[data-testid="tweet"]');
-      if (!article) return null;
+    const content = await page.evaluate((selectors) => {
+      // Try different methods to get the tweet content
+      for (const selector of selectors) {
+        const elements = document.querySelectorAll(selector);
+        if (elements.length > 0) {
+          // Combine text content from all matching elements
+          return Array.from(elements)
+            .map((el) => el.textContent || "")
+            .join("\n")
+            .trim();
+        }
+      }
 
-      const tweetTextElements = article.querySelectorAll(
-        '[data-testid="tweetText"]'
-      );
-      return Array.from(tweetTextElements)
-        .map((el) => el.textContent || "")
-        .join("\n");
-    });
+      // Fallback: try to find any element with tweet-like content
+      const tweetContainer = document.querySelector('div[role="article"]');
+      if (tweetContainer) {
+        return tweetContainer.textContent || "";
+      }
+
+      return null;
+    }, possibleSelectors);
 
     if (!content) {
+      console.error("No tweet content found using any selector");
       throw new Error("Failed to extract tweet content");
     }
 
+    // Clean up the content
+    const cleanedContent = content
+      .replace(/\s+/g, " ") // Replace multiple spaces with single space
+      .replace(/(?:https?|ftp):\/\/[\n\S]+/g, "") // Remove URLs
+      .trim();
+
+    if (cleanedContent.length < 8) {
+      throw new Error("Tweet content too short or empty after cleaning");
+    }
+
+    console.log(
+      `Successfully extracted tweet content (${cleanedContent.length} chars)`
+    );
     return {
-      content: content.trim(),
+      content: cleanedContent,
       title: null,
     };
   } catch (error) {
