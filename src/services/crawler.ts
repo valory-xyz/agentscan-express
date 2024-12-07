@@ -1760,7 +1760,6 @@ async function filter_youtube_content(transcript: string) {
   }
 }
 
-// Add X post scraping function
 async function scrapeXPost(
   url: string
 ): Promise<{ content: string; title: string | null }> {
@@ -1768,7 +1767,7 @@ async function scrapeXPost(
   let page = null;
 
   try {
-    browser = await getBrowser(); // Use shared browser instance
+    browser = await getBrowser();
 
     const context = await browser.newContext({
       userAgent:
