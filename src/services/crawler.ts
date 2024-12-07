@@ -49,7 +49,7 @@ const crawlQueue = new PQueue({
 // Add these timeout constants at the top
 const TIMEOUTS = {
   PAGE_LOAD: 30000, // 30 seconds for initial page load
-  SCRAPE_OPERATION: 45000, // 45 seconds for scraping content
+  _OPERATION: 45000, // 45 seconds for scraping content
   FILTER_CONTENT: 60000, // 60 seconds for content filtering
   EMBEDDING_GENERATION: 30000, // 30 seconds for embedding generation
   PDF_DOWNLOAD: 30000, // 30 seconds for PDF download
@@ -64,7 +64,7 @@ const CRAWL_TIMEOUTS = {
 
 // Add X-related constants
 const X_TIMEOUTS = {
-  SCRAPE: 30000, // 30 seconds for scraping X post
+  NORMAL: 30000, // 30 seconds for scraping X post
   PROCESS: 45000, // 45 seconds for processing content
 };
 
@@ -186,7 +186,7 @@ function normalizeUrl(url: string): string {
 }
 
 // Add interface near the top of file
-interface ScrapedContent {
+interface dContent {
   bodyText: string;
   links: string[];
   title?: string;
@@ -603,11 +603,11 @@ async function transcribeYoutubeVideo(
   }
 }
 
-// Update the scrape_website function's YouTube handling section
-async function scrape_website(
+// Update the _website function's YouTube handling section
+async function _website(
   url: string,
   organization_id: string
-): Promise<ScrapedContent> {
+): Promise<dContent> {
   let browser: any = null;
   let context: any = null;
   let page: any = null;
@@ -619,7 +619,7 @@ async function scrape_website(
       url.includes("/status/")
     ) {
       console.log(`Detected X post URL: ${url}`);
-      const { content } = await scrapeXPost(url);
+      const { content } = await XPost(url);
       return {
         bodyText: content,
         links: [],
@@ -657,8 +657,8 @@ async function scrape_website(
     return withRetry(
       async () => {
         try {
-          console.log(`Starting scrape for ${url}`);
-          // Launch a new browser instance for each scrape
+          console.log(`Starting  for ${url}`);
+          // Launch a new browser instance for each
           browser = await chromium.launch({
             headless: true,
             args: [
@@ -701,10 +701,10 @@ async function scrape_website(
             new Promise((_, reject) =>
               setTimeout(
                 () => reject(new Error("Content scraping timeout")),
-                TIMEOUTS.SCRAPE_OPERATION
+                TIMEOUTS._OPERATION
               )
             ),
-          ])) as ScrapedContent;
+          ])) as dContent;
 
           content.links = content.links
             .map(normalizeUrl)
@@ -729,7 +729,7 @@ async function scrape_website(
       }
     );
   } catch (error) {
-    console.error("Fatal error in scrape_website:", error);
+    console.error("Fatal error in _website:", error);
     // Ensure cleanup even on error
     try {
       if (page) await page.close().catch(console.error);
@@ -1233,7 +1233,7 @@ export async function crawl_website(
       if (base_url.includes("/status/")) {
         // This is a single tweet URL
         console.log(`Processing single X post: ${base_url}`);
-        const { content } = await scrapeXPost(base_url);
+        const { content } = await XPost(base_url);
         if (content) {
           await processDocument(base_url, content, organization_id);
         }
@@ -1322,13 +1322,13 @@ export async function crawl_website(
         "document"
       );
 
-      console.log(`Starting scrape for ${base_url}`);
-      const { bodyText, links, title } = await scrape_website(
+      console.log(`Starting  for ${base_url}`);
+      const { bodyText, links, title } = await _website(
         base_url,
         organization_id
       );
       console.log(
-        `Scraped content for ${base_url}, content length: ${bodyText.length}`
+        `d content for ${base_url}, content length: ${bodyText.length}`
       );
 
       // Only filter and process content if it hasn't been processed before
@@ -1754,9 +1754,7 @@ async function filter_youtube_content(transcript: string) {
   }
 }
 
-async function scrapeXPost(
-  url: string
-): Promise<{ content: string; title: null }> {
+async function XPost(url: string): Promise<{ content: string; title: null }> {
   let browser = null;
   let page = null;
 
@@ -1768,7 +1766,7 @@ async function scrapeXPost(
     });
 
     page = await context.newPage();
-    await page.setDefaultTimeout(X_TIMEOUTS.SCRAPE);
+    await page.setDefaultTimeout(X_TIMEOUTS.NORMAL);
 
     console.log(`Navigating to X post: ${url}`);
     await page.goto(url, { waitUntil: "networkidle" });
@@ -1810,8 +1808,8 @@ async function scrapeXPost(
 
     // Clean up the content
     const cleanedContent = content
-      .replace(/\s+/g, " ") // Replace multiple spaces with single space
-      .replace(/(?:https?|ftp):\/\/[\n\S]+/g, "") // Remove URLs
+      .replace(/\s+/g, " ")
+      .replace(/(?:https?|ftp):\/\/[\n\S]+/g, "")
       .trim();
 
     if (cleanedContent.length < 8) {
@@ -1842,17 +1840,17 @@ interface XAccountPost {
   title?: string;
 }
 
-interface XAccountScrapeResult {
+interface XAccountResult {
   posts: XAccountPost[];
   username: string;
   error?: string;
 }
 
 // Add this new function
-async function scrapeXAccount(
+async function XAccount(
   username: string,
   maxPosts: number = 1000
-): Promise<XAccountScrapeResult> {
+): Promise<XAccountResult> {
   let browser = null;
   let page = null;
 
@@ -2010,11 +2008,11 @@ export async function processXAccount(
 ): Promise<boolean> {
   try {
     console.log(`Processing X account: ${username}`);
-    const result = await scrapeXAccount(username, maxPosts);
-    console.log(`Scraped ${result.posts.length} posts from ${username}`);
+    const result = await XAccount(username, maxPosts);
+    console.log(`d ${result.posts.length} posts from ${username}`);
 
     if (result.error || result.posts.length === 0) {
-      console.error(`Failed to scrape X account ${username}:`, result.error);
+      console.error(`Failed to  X account ${username}:`, result.error);
       return false;
     }
 
@@ -2049,8 +2047,8 @@ export async function processXAccount(
             "document"
           );
 
-          // Get full post content using existing scrapeXPost
-          const { content } = await scrapeXPost(post.url);
+          // Get full post content using existing XPost
+          const { content } = await XPost(post.url);
 
           if (content) {
             await processDocument(post.url, content, organization_id);
