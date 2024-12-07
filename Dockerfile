@@ -1,22 +1,29 @@
 # Use Node 18 as base image
 FROM node:18-bullseye-slim
 
-# Install dependencies for Puppeteer
+# Install dependencies for Playwright
 RUN apt-get update && apt-get install -y \
+    wget \
     chromium \
-    fonts-ipafont-gothic \
-    fonts-wqy-zenhei \
-    fonts-thai-tlwg \
-    fonts-kacst \
-    fonts-freefont-ttf \
-    fonts-liberation \
-    fonts-liberation2 \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Set environment variables
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV PLAYWRIGHT_BROWSERS_PATH=/usr/lib/playwright \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0
 
 # Create app directory
 WORKDIR /app
@@ -24,8 +31,9 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install
+# Install dependencies and Playwright
+RUN npm install && \
+    npx playwright install chromium --with-deps
 
 # Copy source code
 COPY . .
