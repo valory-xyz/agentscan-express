@@ -418,25 +418,47 @@ async function filter_pdf_content(raw_text: string) {
 
 // Add this new browser management utility
 let browserInstance: Browser | null = null;
+
+// Update the browser launch options
+const BROWSER_LAUNCH_OPTIONS = {
+  headless: true,
+  args: [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--disable-software-rasterizer",
+    "--disable-extensions",
+    "--single-process", // Reduce complexity
+    "--no-zygote", // Avoid requiring newer GLIBC
+    "--disable-accelerated-2d-canvas",
+    "--disable-gl-drawing-for-tests",
+    "--use-gl=swiftshader",
+  ],
+  executablePath: process.env.CHROME_BIN || undefined, // Allow custom Chrome path
+  ignoreDefaultArgs: ["--disable-extensions"], // Prevent duplicate args
+};
+
+// Update the getBrowser function
 async function getBrowser(): Promise<Browser> {
   try {
     if (!browserInstance) {
-      const launchOptions = {
-        headless: true,
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-gpu",
-          "--single-process",
-        ],
-      };
-      browserInstance = await chromium.launch(launchOptions);
+      console.log(
+        "Launching new browser instance with custom configuration..."
+      );
+      browserInstance = await chromium.launch(BROWSER_LAUNCH_OPTIONS);
     }
     return browserInstance;
   } catch (error) {
     console.error("Failed to launch browser:", error);
-    throw error;
+    // Fallback to basic configuration if initial launch fails
+    const fallbackOptions = {
+      ...BROWSER_LAUNCH_OPTIONS,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    };
+    console.log("Attempting fallback launch configuration...");
+    browserInstance = await chromium.launch(fallbackOptions);
+    return browserInstance;
   }
 }
 
@@ -1724,10 +1746,7 @@ async function scrapeXPost(
   let page = null;
 
   try {
-    browser = await chromium.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
+    browser = await getBrowser(); // Use shared browser instance
 
     const context = await browser.newContext({
       userAgent:
@@ -1835,7 +1854,7 @@ async function scrapeXPost(
     throw error;
   } finally {
     if (page) await page.close().catch(console.error);
-    if (browser) await browser.close().catch(console.error);
+    // Don't close browser here, let it be managed by getBrowser
   }
 }
 
@@ -1863,10 +1882,7 @@ async function scrapeXAccount(
   let page = null;
 
   try {
-    browser = await chromium.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
+    browser = await getBrowser(); // Use shared browser instance
 
     const context = await browser.newContext({
       userAgent:
@@ -2007,7 +2023,7 @@ async function scrapeXAccount(
     };
   } finally {
     if (page) await page.close().catch(console.error);
-    if (browser) await browser.close().catch(console.error);
+    // Don't close browser here, let it be managed by getBrowser
   }
 }
 
