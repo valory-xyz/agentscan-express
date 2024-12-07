@@ -2034,7 +2034,7 @@ async function scrapeXAccount(
   }
 }
 
-// Add this function to process an account's posts
+// Update the processXAccount function to use batches
 export async function processXAccount(
   username: string,
   organization_id: string,
@@ -2050,60 +2050,90 @@ export async function processXAccount(
       return false;
     }
 
-    // Process each post
-    const processPromises = result.posts.map(async (post) => {
-      const urlId = crypto.createHash("sha256").update(post.url).digest("hex");
+    // Process posts in batches of 4
+    const BATCH_SIZE = 4;
+    const batches = [];
+    for (let i = 0; i < result.posts.length; i += BATCH_SIZE) {
+      batches.push(result.posts.slice(i, i + BATCH_SIZE));
+    }
 
-      try {
-        await updateProcessingStatus(
-          urlId,
-          post.url,
-          ProcessingStatus.PROCESSING,
-          organization_id,
-          undefined,
-          "document"
-        );
+    let successCount = 0;
+    let batchNumber = 1;
 
-        // Get full post content using existing scrapeXPost
-        const { content, title } = await scrapeXPost(post.url);
+    for (const batch of batches) {
+      console.log(
+        `Processing batch ${batchNumber}/${batches.length} for ${username}`
+      );
 
-        if (content) {
-          await processDocument(
-            post.url,
-            content,
-            organization_id,
-            title || undefined
-          );
+      const batchPromises = batch.map(async (post) => {
+        const urlId = crypto
+          .createHash("sha256")
+          .update(post.url)
+          .digest("hex");
+
+        try {
           await updateProcessingStatus(
             urlId,
             post.url,
-            ProcessingStatus.COMPLETED,
+            ProcessingStatus.PROCESSING,
             organization_id,
             undefined,
             "document"
           );
-          return true;
-        }
-        return false;
-      } catch (error: any) {
-        console.error(`Error processing X post ${post.url}:`, error);
-        await updateProcessingStatus(
-          urlId,
-          post.url,
-          ProcessingStatus.FAILED,
-          organization_id,
-          error?.message,
-          "document"
-        );
-        return false;
-      }
-    });
 
-    const results = await Promise.all(processPromises);
-    const successCount = results.filter(Boolean).length;
+          // Get full post content using existing scrapeXPost
+          const { content, title } = await scrapeXPost(post.url);
+
+          if (content) {
+            await processDocument(
+              post.url,
+              content,
+              organization_id,
+              title || undefined
+            );
+            await updateProcessingStatus(
+              urlId,
+              post.url,
+              ProcessingStatus.COMPLETED,
+              organization_id,
+              undefined,
+              "document"
+            );
+            return true;
+          }
+          return false;
+        } catch (error: any) {
+          console.error(`Error processing X post ${post.url}:`, error);
+          await updateProcessingStatus(
+            urlId,
+            post.url,
+            ProcessingStatus.FAILED,
+            organization_id,
+            error?.message,
+            "document"
+          );
+          return false;
+        }
+      });
+
+      const batchResults = await Promise.all(batchPromises);
+      const batchSuccesses = batchResults.filter(Boolean).length;
+      successCount += batchSuccesses;
+
+      console.log(
+        `Batch ${batchNumber}/${batches.length}: Processed ${batchSuccesses}/${BATCH_SIZE} posts successfully`
+      );
+
+      // Add a small delay between batches
+      if (batchNumber < batches.length) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+
+      batchNumber++;
+    }
 
     console.log(
-      `Processed ${successCount}/${result.posts.length} posts from ${username}`
+      `Completed processing ${username}: ${successCount}/${result.posts.length} posts processed successfully`
     );
     return successCount > 0;
   } catch (error) {
