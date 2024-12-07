@@ -429,14 +429,16 @@ const BROWSER_LAUNCH_OPTIONS = {
     "--disable-gpu",
     "--disable-software-rasterizer",
     "--disable-extensions",
-    "--single-process", // Reduce complexity
-    "--no-zygote", // Avoid requiring newer GLIBC
-    "--disable-accelerated-2d-canvas",
-    "--disable-gl-drawing-for-tests",
+    "--no-first-run",
+    "--no-service-autorun",
+    "--no-default-browser-check",
+    "--password-store=basic",
     "--use-gl=swiftshader",
+    "--enable-webgl",
+    "--disable-translate",
   ],
-  executablePath: process.env.CHROME_BIN || undefined, // Allow custom Chrome path
-  ignoreDefaultArgs: ["--disable-extensions"], // Prevent duplicate args
+  executablePath: process.env.CHROME_BIN || undefined,
+  ignoreDefaultArgs: ["--disable-extensions"],
 };
 
 // Update the getBrowser function
@@ -453,8 +455,13 @@ async function getBrowser(): Promise<Browser> {
     console.error("Failed to launch browser:", error);
     // Fallback to basic configuration if initial launch fails
     const fallbackOptions = {
-      ...BROWSER_LAUNCH_OPTIONS,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+      ],
+      ignoreHTTPSErrors: true,
     };
     console.log("Attempting fallback launch configuration...");
     browserInstance = await chromium.launch(fallbackOptions);
