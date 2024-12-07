@@ -1221,7 +1221,7 @@ async function processGithubRepo(
   }
 }
 
-// Update crawl_website to handle X posts without recursion
+// Update crawl_website to better handle X posts
 export async function crawl_website(
   base_url: string,
   max_depth: number = 7,
@@ -1231,10 +1231,25 @@ export async function crawl_website(
   try {
     // Handle X/Twitter posts first and return immediately
     if (base_url.includes("x.com") || base_url.includes("twitter.com")) {
-      //get the username from the url
-      const username = base_url.split("/").pop();
-      if (username) {
-        await processXAccount(username, organization_id);
+      if (base_url.includes("/status/")) {
+        // This is a single tweet URL
+        console.log(`Processing single X post: ${base_url}`);
+        const { content, title } = await scrapeXPost(base_url);
+        if (content) {
+          await processDocument(
+            base_url,
+            content,
+            organization_id,
+            title || undefined
+          );
+        }
+      } else {
+        // This is a user profile URL
+        const username = base_url.split("/").pop()?.replace("@", "");
+        if (username) {
+          console.log(`Processing X account: ${username}`);
+          await processXAccount(username, organization_id);
+        }
       }
       // Return empty array to prevent further crawling
       return [];
