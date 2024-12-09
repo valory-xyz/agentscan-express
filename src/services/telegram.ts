@@ -2,6 +2,7 @@ import { Context } from "telegraf";
 
 import { generateConversationResponse, getTeamData } from "./conversation";
 import { checkRateLimit } from "../utils/messageLimiter";
+import { amplitudeClient } from "../initalizers/amplitude";
 
 const TEAM_ID = "56917ba2-9084-40c3-b9cf-67cd30cc389a";
 
@@ -14,7 +15,8 @@ function formatThreadContextForAI(threadContext: any[]): any[] {
   }));
 }
 
-export async function handleTelegramMessage(ctx: Context): Promise<void> {
+export const handleTelegramMessage = async (ctx: Context): Promise<void> => {
+  const messageId = ctx.message?.message_id;
   try {
     if (!ctx.botInfo) {
       console.error("Bot not properly initialized");
@@ -64,6 +66,25 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
     }
 
     const teamData = await getTeamData(TEAM_ID);
+
+    amplitudeClient.track({
+      event_type: "conversation_made",
+      user_id: userId,
+      user_properties: {
+        username: ctx.from?.username || "unknown",
+      },
+      event_properties: {
+        teamId: TEAM_ID,
+        question: ctx.message.text
+          .replace(`@${ctx.botInfo.username}`, "")
+          .trim(),
+        source: "telegram",
+        messages: formattedContext,
+        chat_id: ctx.chat?.id || "unknown",
+        chat_type: ctx.chat?.type || "unknown",
+      },
+    });
+
     await streamResponse(
       ctx,
       ctx.message.text.replace(`@${ctx.botInfo.username}`, "").trim(),
@@ -76,13 +97,18 @@ export async function handleTelegramMessage(ctx: Context): Promise<void> {
     console.error("Error handling message:", error);
     try {
       await ctx.reply(
-        "Sorry, something went wrong while processing your message."
+        "Sorry, something went wrong while processing your message.",
+        {
+          reply_parameters: {
+            message_id: messageId,
+          },
+        } as any
       );
     } catch (replyError) {
       console.error("Failed to send error message:", replyError);
     }
   }
-}
+};
 
 async function streamResponse(
   ctx: Context,
@@ -110,14 +136,13 @@ async function streamResponse(
     )) {
       if (response.error) {
         clearInterval(typingInterval);
-        await ctx.telegram.sendMessage(
-          ctx.chat!.id,
+        await ctx.reply(
           "Sorry, I encountered an error while processing your request.",
           {
             reply_parameters: {
               message_id: replyToMessageId ?? ctx.message?.message_id ?? 0,
             },
-          }
+          } as any
         );
         return;
       }
@@ -129,7 +154,7 @@ async function streamResponse(
           reply_parameters: {
             message_id: replyToMessageId ?? ctx.message?.message_id ?? 0,
           },
-        });
+        } as any);
 
         if (sentMessage) {
           const updatedContext = [
@@ -143,6 +168,22 @@ async function streamResponse(
           threadContexts.set(sentMessage.message_id, updatedContext);
         }
 
+        amplitudeClient.track({
+          event_type: "conversation_completed",
+          user_id: ctx.from?.id.toString(),
+          user_properties: {
+            username: ctx.from?.username || "unknown",
+          },
+          event_properties: {
+            teamId: TEAM_ID,
+            question,
+            source: "telegram",
+            answer: fullResponse,
+            chat_id: ctx.chat?.id || "unknown",
+            chat_type: ctx.chat?.type || "unknown",
+          },
+        });
+
         return;
       }
 
@@ -154,10 +195,8 @@ async function streamResponse(
     await ctx.reply(
       "Sorry, something went wrong while generating the response.",
       {
-        reply_parameters: {
-          message_id: replyToMessageId ?? ctx.message?.message_id ?? 0,
-        },
-      }
+        reply_to_message_id: replyToMessageId ?? ctx.message?.message_id ?? 0,
+      } as any
     );
   }
 }
