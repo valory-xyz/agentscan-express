@@ -102,6 +102,7 @@ export const handleTelegramMessage = async (ctx: Context): Promise<void> => {
           reply_parameters: {
             message_id: messageId,
           },
+          parse_mode: "Markdown",
         } as any
       );
     } catch (replyError) {
@@ -154,6 +155,7 @@ async function streamResponse(
           reply_parameters: {
             message_id: replyToMessageId ?? ctx.message?.message_id ?? 0,
           },
+          parse_mode: "Markdown",
         } as any);
 
         if (sentMessage) {
@@ -195,7 +197,10 @@ async function streamResponse(
     await ctx.reply(
       "Sorry, something went wrong while generating the response.",
       {
-        reply_to_message_id: replyToMessageId ?? ctx.message?.message_id ?? 0,
+        reply_parameters: {
+          message_id: replyToMessageId ?? ctx.message?.message_id ?? 0,
+        },
+        parse_mode: "Markdown",
       } as any
     );
   }

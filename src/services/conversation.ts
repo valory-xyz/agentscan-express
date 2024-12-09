@@ -100,7 +100,7 @@ export async function findRelevantContext(
     "deploy agent",
     "deploying agent",
     "non technical",
-    "non technical guide",
+
     "easy",
     "simple way",
     "beginner",
