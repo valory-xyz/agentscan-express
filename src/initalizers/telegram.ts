@@ -1,6 +1,10 @@
 import { Telegraf } from "telegraf";
 import dotenv from "dotenv";
-import { handleTelegramMessage } from "../services/telegram";
+import {
+  handleDisableCommand,
+  handleEnableCommand,
+  handleTelegramMessage,
+} from "../services/telegram";
 
 dotenv.config();
 
@@ -57,9 +61,14 @@ export const initializeTelegram = async (
   delay = INITIAL_RETRY_DELAY
 ): Promise<void> => {
   try {
+    console.log("Registering Telegram commands...");
+
+    telegramClient.command("enable", handleEnableCommand);
+    telegramClient.command("disable", handleDisableCommand);
+
     telegramClient.on("message", handleTelegramMessage);
 
-    await withTimeout(telegramClient.launch(), TIMEOUT_MS);
+    await telegramClient.launch();
     console.log("Telegram bot successfully initialized!");
 
     process.once("SIGINT", () => telegramClient.stop("SIGINT"));

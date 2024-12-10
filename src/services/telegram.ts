@@ -3,16 +3,53 @@ import { Context } from "telegraf";
 import { generateConversationResponse, getTeamData } from "./conversation";
 import { checkRateLimit } from "../utils/messageLimiter";
 import { amplitudeClient } from "../initalizers/amplitude";
+import { isGroupAdmin } from "../utils/telegramHelpers";
+import { pool } from "../initalizers/postgres";
 
 const TEAM_ID = "56917ba2-9084-40c3-b9cf-67cd30cc389a";
-
 const threadContexts = new Map<number, any[]>();
+const TYPING_INTERVAL_MS = 4000;
+
+async function isSupergroupAllowed(
+  chatId: number,
+  threadId?: number
+): Promise<boolean> {
+  const result = await pool.query(
+    "SELECT 1 FROM telegram_allowed_supergroups WHERE chat_id = $1 AND (thread_id = $2 OR thread_id IS NULL)",
+    [chatId, threadId]
+  );
+  return result.rows.length > 0;
+}
 
 function formatThreadContextForAI(threadContext: any[]): any[] {
   return threadContext.map((msg) => ({
     role: msg.from?.is_bot ? "assistant" : "user",
     content: msg.text?.replace(/@\w+/g, "").trim() || "",
   }));
+}
+
+async function startTypingIndicator(
+  ctx: Context,
+  chatId: number
+): Promise<NodeJS.Timeout> {
+  const threadId = ctx.msg?.isAccessible()
+    ? ctx.msg.is_topic_message
+      ? ctx.msg.message_thread_id
+      : undefined
+    : undefined;
+
+  await ctx.telegram.sendChatAction(chatId, "typing", {
+    message_thread_id: threadId,
+  });
+  return setInterval(async () => {
+    try {
+      await ctx.telegram.sendChatAction(chatId, "typing", {
+        message_thread_id: threadId,
+      });
+    } catch (error) {
+      console.error("Error sending typing indicator:", error);
+    }
+  }, TYPING_INTERVAL_MS);
 }
 
 export const handleTelegramMessage = async (ctx: Context): Promise<void> => {
@@ -24,11 +61,31 @@ export const handleTelegramMessage = async (ctx: Context): Promise<void> => {
     }
 
     if (!ctx.message || !("text" in ctx.message)) {
+      console.log("No message or text content");
+      return;
+    }
+
+    if (ctx.message?.text?.startsWith("/")) {
+      console.log("Command message - ignoring");
       return;
     }
 
     const isPrivateChat = ctx.chat?.type === "private";
     const isBotMention = ctx.message.text.includes(`@${ctx.botInfo.username}`);
+
+    if (ctx.chat?.type === "supergroup") {
+      const threadId = ctx.msg?.isAccessible()
+        ? ctx.msg.is_topic_message
+          ? ctx.msg.message_thread_id
+          : undefined
+        : undefined;
+
+      const isAllowed = await isSupergroupAllowed(ctx.chat.id, threadId);
+      if (!isAllowed) {
+        console.log("Supergroup not allowed");
+        return;
+      }
+    }
 
     if (!isPrivateChat && !isBotMention) return;
 
@@ -41,18 +98,22 @@ export const handleTelegramMessage = async (ctx: Context): Promise<void> => {
       await ctx.reply(
         `You've reached the message limit. Please try again in ${Math.ceil(
           ttl || 0
-        )} seconds.`
+        )} seconds.`,
+        {
+          reply_parameters: {
+            message_id: messageId,
+          },
+        } as any
       );
       return;
     }
 
-    const replyToMessageId = ctx.message.reply_to_message?.message_id;
     const currentMessageId = ctx.message.message_id;
 
     let threadContext: any[] = [];
 
-    if (replyToMessageId) {
-      threadContext = threadContexts.get(replyToMessageId) || [];
+    if (currentMessageId) {
+      threadContext = threadContexts.get(currentMessageId) || [];
     }
 
     threadContext.push(ctx.message);
@@ -90,8 +151,7 @@ export const handleTelegramMessage = async (ctx: Context): Promise<void> => {
       ctx.message.text.replace(`@${ctx.botInfo.username}`, "").trim(),
       formattedContext,
       teamData,
-      threadContext,
-      replyToMessageId
+      threadContext
     );
   } catch (error) {
     console.error("Error handling message:", error);
@@ -116,18 +176,21 @@ async function streamResponse(
   question: string,
   conversationHistory: any[],
   teamData: any,
-  threadContext: any[],
-  replyToMessageId?: number
+  threadContext: any[]
 ): Promise<void> {
   let fullResponse = "";
   let typingInterval: NodeJS.Timeout | undefined;
 
   try {
     if (ctx.chat?.id) {
-      typingInterval = setInterval(async () => {
-        await ctx.telegram.sendChatAction(ctx.chat!.id, "typing");
-      }, 4000);
+      typingInterval = await startTypingIndicator(ctx, ctx.chat?.id);
     }
+
+    const threadId = ctx.msg?.isAccessible()
+      ? ctx.msg.is_topic_message
+        ? ctx.msg.message_thread_id
+        : undefined
+      : undefined;
 
     for await (const response of generateConversationResponse(
       question,
@@ -136,12 +199,14 @@ async function streamResponse(
       false
     )) {
       if (response.error) {
-        clearInterval(typingInterval);
+        if (typingInterval) {
+          clearInterval(typingInterval);
+        }
         await ctx.reply(
           "Sorry, I encountered an error while processing your request.",
           {
             reply_parameters: {
-              message_id: replyToMessageId ?? ctx.message?.message_id ?? 0,
+              message_id: ctx.message?.message_id ?? 0,
             },
           } as any
         );
@@ -149,12 +214,15 @@ async function streamResponse(
       }
 
       if (response.done) {
-        clearInterval(typingInterval);
+        if (typingInterval) {
+          clearInterval(typingInterval);
+        }
 
         const sentMessage = await ctx.reply(fullResponse, {
           reply_parameters: {
-            message_id: replyToMessageId ?? ctx.message?.message_id ?? 0,
+            message_id: ctx.message?.message_id ?? 0,
           },
+          message_thread_id: threadId,
           parse_mode: "Markdown",
         } as any);
 
@@ -192,16 +260,112 @@ async function streamResponse(
       fullResponse += response.content;
     }
   } catch (error) {
-    clearInterval(typingInterval);
+    if (typingInterval) {
+      clearInterval(typingInterval);
+    }
     console.error("Error in stream response:", error);
     await ctx.reply(
       "Sorry, something went wrong while generating the response.",
       {
         reply_parameters: {
-          message_id: replyToMessageId ?? ctx.message?.message_id ?? 0,
+          message_id: ctx.message?.message_id ?? 0,
         },
         parse_mode: "Markdown",
       } as any
     );
+  } finally {
+    if (typingInterval) {
+      clearInterval(typingInterval);
+    }
   }
 }
+
+export const handleEnableCommand = async (ctx: Context): Promise<void> => {
+  try {
+    if (ctx.chat?.type !== "supergroup") {
+      await ctx.reply("This command is only available in supergroups.");
+      return;
+    }
+
+    const isAdmin = await isGroupAdmin(ctx);
+    if (!isAdmin) {
+      await ctx.reply("Only group administrators can enable the bot.");
+      return;
+    }
+
+    const threadId = ctx.msg?.isAccessible()
+      ? ctx.msg.is_topic_message
+        ? ctx.msg.message_thread_id
+        : undefined
+      : undefined;
+
+    console.log("threadId", threadId);
+
+    await pool.query(
+      `INSERT INTO telegram_allowed_supergroups (chat_id, thread_id, enabled_by) 
+       SELECT $1, $2, $3
+       WHERE NOT EXISTS (
+         SELECT 1 FROM telegram_allowed_supergroups 
+         WHERE chat_id = $1 AND thread_id = $2
+       )`,
+      [ctx.chat.id, threadId, ctx.from?.id]
+    );
+
+    const verificationResult = await pool.query(
+      "SELECT * FROM telegram_allowed_supergroups WHERE chat_id = $1 AND thread_id = $2",
+      [ctx.chat.id, threadId]
+    );
+
+    if (verificationResult.rows.length > 0) {
+      console.log("Successfully added supergroup:", verificationResult.rows[0]);
+      await ctx.reply(
+        threadId
+          ? "Bot has been enabled for this topic."
+          : "Bot has been enabled for this supergroup."
+      );
+    } else {
+      console.error("Failed to add supergroup to database");
+      await ctx.reply(
+        "Failed to enable the bot - database verification failed."
+      );
+    }
+  } catch (error) {
+    console.error("Error in enable command:", error);
+    await ctx.reply("Failed to enable the bot.");
+  }
+};
+
+export const handleDisableCommand = async (ctx: Context): Promise<void> => {
+  try {
+    if (ctx.chat?.type !== "supergroup") {
+      await ctx.reply("This command is only available in supergroups.");
+      return;
+    }
+
+    const isAdmin = await isGroupAdmin(ctx);
+    if (!isAdmin) {
+      await ctx.reply("Only group administrators can disable the bot.");
+      return;
+    }
+
+    const threadId = ctx.msg?.isAccessible()
+      ? ctx.msg.is_topic_message
+        ? ctx.msg.message_thread_id
+        : undefined
+      : undefined;
+
+    await pool.query(
+      "DELETE FROM telegram_allowed_supergroups WHERE chat_id = $1 AND thread_id = $2",
+      [ctx.chat.id, threadId]
+    );
+
+    await ctx.reply(
+      threadId
+        ? "Bot has been disabled for this topic."
+        : "Bot has been disabled for this supergroup."
+    );
+  } catch (error) {
+    console.error("Error in disable command:", error);
+    await ctx.reply("Failed to disable the bot.");
+  }
+};
