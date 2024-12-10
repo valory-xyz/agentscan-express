@@ -63,6 +63,17 @@ export const initializeTelegram = async (
   try {
     console.log("Registering Telegram commands...");
 
+    await telegramClient.telegram.setMyCommands([
+      {
+        command: "enable",
+        description: "Enable the bot in this supergroup topic",
+      },
+      {
+        command: "disable",
+        description: "Disable the bot in this supergroup topic",
+      },
+    ]);
+
     telegramClient.command("enable", handleEnableCommand);
     telegramClient.command("disable", handleDisableCommand);
 
