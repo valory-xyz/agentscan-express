@@ -14,11 +14,16 @@ async function isSupergroupAllowed(
   chatId: number,
   threadId?: number
 ): Promise<boolean> {
+  console.log("Checking supergroup access for:", { chatId, threadId });
+
   const result = await pool.query(
-    "SELECT 1 FROM telegram_allowed_supergroups WHERE chat_id = $1 AND (thread_id = $2 OR thread_id IS NULL)",
+    `SELECT enabled FROM telegram_allowed_supergroups 
+     WHERE chat_id = $1 
+     AND (thread_id = $2 OR (thread_id IS NULL AND $2 IS NULL))`,
     [chatId, threadId]
   );
-  return result.rows.length > 0;
+
+  return result.rows.length > 0 && result.rows[0].enabled === true;
 }
 
 function formatThreadContextForAI(threadContext: any[]): any[] {
@@ -81,6 +86,7 @@ export const handleTelegramMessage = async (ctx: Context): Promise<void> => {
         : undefined;
 
       const isAllowed = await isSupergroupAllowed(ctx.chat.id, threadId);
+      console.log("Supergroup access:", { isAllowed, threadId });
       if (!isAllowed) {
         console.log("Supergroup not allowed");
         return;
@@ -296,38 +302,27 @@ export const handleEnableCommand = async (ctx: Context): Promise<void> => {
     const threadId = ctx.msg?.isAccessible()
       ? ctx.msg.is_topic_message
         ? ctx.msg.message_thread_id
-        : undefined
-      : undefined;
+        : null
+      : null;
 
-    console.log("threadId", threadId);
-
-    await pool.query(
-      `INSERT INTO telegram_allowed_supergroups (chat_id, thread_id, enabled_by) 
-       SELECT $1, $2, $3
-       WHERE NOT EXISTS (
-         SELECT 1 FROM telegram_allowed_supergroups 
-         WHERE chat_id = $1 AND thread_id = $2
-       )`,
+    const result = await pool.query(
+      `INSERT INTO telegram_allowed_supergroups (chat_id, thread_id, enabled_by, enabled)
+       VALUES ($1, $2, $3, true)
+       ON CONFLICT (chat_id, thread_id) 
+       DO UPDATE SET enabled_by = $3, enabled = true
+       RETURNING *`,
       [ctx.chat.id, threadId, ctx.from?.id]
     );
 
-    const verificationResult = await pool.query(
-      "SELECT * FROM telegram_allowed_supergroups WHERE chat_id = $1 AND thread_id = $2",
-      [ctx.chat.id, threadId]
-    );
-
-    if (verificationResult.rows.length > 0) {
-      console.log("Successfully added supergroup:", verificationResult.rows[0]);
+    if (result.rows.length > 0) {
       await ctx.reply(
         threadId
           ? "Bot has been enabled for this topic."
           : "Bot has been enabled for this supergroup."
       );
     } else {
-      console.error("Failed to add supergroup to database");
-      await ctx.reply(
-        "Failed to enable the bot - database verification failed."
-      );
+      console.error("Failed to add supergroup to database", result);
+      await ctx.reply("Failed to enable the bot");
     }
   } catch (error) {
     console.error("Error in enable command:", error);
@@ -351,11 +346,14 @@ export const handleDisableCommand = async (ctx: Context): Promise<void> => {
     const threadId = ctx.msg?.isAccessible()
       ? ctx.msg.is_topic_message
         ? ctx.msg.message_thread_id
-        : undefined
-      : undefined;
+        : null
+      : null;
 
     await pool.query(
-      "DELETE FROM telegram_allowed_supergroups WHERE chat_id = $1 AND thread_id = $2",
+      `UPDATE telegram_allowed_supergroups 
+       SET enabled = false 
+       WHERE chat_id = $1 
+       AND (thread_id = $2 OR (thread_id IS NULL AND $2 IS NULL))`,
       [ctx.chat.id, threadId]
     );
 
