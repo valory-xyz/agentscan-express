@@ -17,6 +17,7 @@ router.use(
 );
 router.use("/agent", require("./agent").default);
 router.use("/crawl", require("./crawl").default);
+router.use("/transactions", require("./transactions").default);
 router.get("/health", (req, res) => {
   res.status(200).json({ message: "API is running" });
 });
