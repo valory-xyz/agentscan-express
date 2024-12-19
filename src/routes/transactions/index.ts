@@ -27,9 +27,12 @@ router.get("/", async (req: any, res) => {
       query: `query getTransactions {
         agentFromTransactions(limit: ${limit}${
         cursor ? `, after: "${cursor}"` : ""
-      }) {
-          pageInfo {
-            endCursor
+      },
+        orderBy: "timestamp",
+        orderDirection: "desc"
+      ) {
+        pageInfo {
+          endCursor
           }
           items {
             id
@@ -48,7 +51,6 @@ router.get("/", async (req: any, res) => {
         }
       }`,
     });
-    console.log(response.data);
 
     const transactions = response?.data?.data?.agentFromTransactions?.items.map(
       (tx: any) => ({
