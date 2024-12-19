@@ -30,7 +30,7 @@ router.get("/", async (req: any, res) => {
 
     const response = await axios.post(graphQLURL, {
       query: `query getTransactions {
-        agentFromTransactions(
+        agentInstances(
           limit: ${limit}${cursor ? `, after: "${cursor}"` : ""}
           ${chain ? `, where: { chain: "${chain}" }` : ""}
           orderBy: "timestamp"
@@ -40,31 +40,30 @@ router.get("/", async (req: any, res) => {
             endCursor
           }
           items {
-            id
-            transactionHash
-            chain
-            agentInstance {
-              id
-              agent {
-                name
-                description
-                image
-              }
-            }
             timestamp
+            id
+            agentInstance {
+            agent {
+              image
+              name
+              description
+              codeUri
+              timestamp
+            }
           }
         }
       }`,
     });
 
-    const transactions = response?.data?.data?.agentFromTransactions?.items.map(
-      (tx: any) => ({
-        ...tx,
-        link: getTransactionLink(tx.chain, tx.transactionHash),
+    const transactions = response?.data?.data?.agentInstances?.items.map(
+      (item: any) => ({
+        id: item.id,
+        timestamp: item.timestamp,
+        agent: item.agent,
       })
     );
     const nextCursor =
-      response?.data?.data?.agentFromTransactions?.pageInfo?.endCursor || null;
+      response?.data?.data?.agentInstances?.pageInfo?.endCursor || null;
     if (!transactions || transactions.length === 0) {
       return res.status(200).json({
         transactions: [],
