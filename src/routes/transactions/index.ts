@@ -22,17 +22,22 @@ router.get("/", async (req: any, res) => {
       "https://agentscan-agentindexing-kx37-update-ponder.ponder-dev.com/";
     const limit = 20;
     const cursor = req.query.cursor || null;
+    const chain = req.query.chain?.toLowerCase();
+
+    if (chain && !["base", "gnosis", "mainnet"].includes(chain)) {
+      return res.status(400).json({ message: "Invalid chain parameter" });
+    }
 
     const response = await axios.post(graphQLURL, {
       query: `query getTransactions {
-        agentFromTransactions(limit: ${limit}${
-        cursor ? `, after: "${cursor}"` : ""
-      },
-        orderBy: "timestamp",
-        orderDirection: "desc"
-      ) {
-        pageInfo {
-          endCursor
+        agentFromTransactions(
+          limit: ${limit}${cursor ? `, after: "${cursor}"` : ""}
+          ${chain ? `, where: { chain: "${chain}" }` : ""}
+          orderBy: "timestamp"
+          orderDirection: "desc"
+        ) {
+          pageInfo {
+            endCursor
           }
           items {
             id
