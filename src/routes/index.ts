@@ -15,11 +15,11 @@ router.use(
     authAndRateLimit(req, res, next, req?.user),
   require("./conversation").default
 );
-router.use("/agent", require("./agent").default);
+router.use("/agents", require("./agents").default);
 router.use("/crawl", require("./crawl").default);
 router.use("/transactions", require("./transactions").default);
 router.get("/health", (req, res) => {
   res.status(200).json({ message: "API is running" });
 });
-
+router.use("/instance", require("./instance").default);
 export default router;
