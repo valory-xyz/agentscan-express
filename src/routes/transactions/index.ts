@@ -19,8 +19,6 @@ const getTransactionLink = (chain: string, txHash: string) => {
 
 router.get("/", async (req: any, res) => {
   try {
-    const graphQLURL =
-      "https://agentscan-agentindexing-kx37-uncomment-void.ponder-dev.com";
     const limit = 20;
     const cursor = req.query.cursor || null;
     const chain = req.query.chain?.toLowerCase();

@@ -48,13 +48,18 @@ router.get("/", async (req: any, res) => {
       }`,
     });
 
-    const transactions = response?.data?.data?.agentFromTransactions?.items.map(
-      (item: any) => ({
+    const transactions = response?.data?.data?.agentFromTransactions?.items
+      .filter((item: any) => item?.agentInstance?.agent)
+      .map((item: any) => ({
         id: item?.agentInstance?.id,
-        timestamp: item.timestamp,
-        agent: item.agentInstance.agent,
-      })
-    );
+        timestamp: item?.timestamp,
+        agent: {
+          image: item?.agentInstance?.agent?.image || null,
+          name: item?.agentInstance?.agent?.name || null,
+          description: item?.agentInstance?.agent?.description || null,
+          codeUri: item?.agentInstance?.agent?.codeUri || null,
+        },
+      }));
 
     const nextCursor =
       response?.data?.data?.agentFromTransactions?.pageInfo?.endCursor || null;
