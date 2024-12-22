@@ -4,8 +4,7 @@ import { redis } from "../initalizers/redis";
 const CACHE_TTL = 15 * 60;
 const TX_TTL = 4 * 60;
 const ERROR_TTL = 15;
-const graphQLURL =
-  "https://agentscan-agentindexing-kx37-uncomment-void.ponder-dev.com";
+const graphQLURL = "https://agentscan-agentindexing-kx37.ponder-dev.com";
 
 interface Transaction {
   timestamp: string;

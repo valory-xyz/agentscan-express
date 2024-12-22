@@ -6,8 +6,6 @@ const router = Router();
 
 router.get("/", async (req: any, res) => {
   try {
-    const graphQLURL =
-      "https://agentscan-agentindexing-kx37-uncomment-void.ponder-dev.com";
     const instanceId = req.query.id;
 
     if (!instanceId) {

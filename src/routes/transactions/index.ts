@@ -4,19 +4,6 @@ import { getTransactions } from "../../services/transactions";
 
 const router = Router();
 
-const getTransactionLink = (chain: string, txHash: string) => {
-  switch (chain.toLowerCase()) {
-    case "gnosis":
-      return `https://gnosisscan.io/tx/${txHash}`;
-    case "base":
-      return `https://basescan.org/tx/${txHash}`;
-    case "mainnet":
-      return `https://etherscan.io/tx/${txHash}`;
-    default:
-      return "";
-  }
-};
-
 router.get("/", async (req: any, res) => {
   try {
     const limit = 20;
