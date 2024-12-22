@@ -10,6 +10,9 @@ router.get("/", async (req: any, res) => {
     const limit = 20;
     const cursor = req.query.cursor || null;
     const chain = req.query.chain?.toLowerCase();
+    const excludedIds = req.query.excludedIds
+      ? req.query?.excludedIds?.split(",")
+      : [];
 
     if (chain && !["base", "gnosis", "mainnet"].includes(chain)) {
       return res.status(400).json({ message: "Invalid chain parameter" });
@@ -17,9 +20,12 @@ router.get("/", async (req: any, res) => {
 
     const response = await axios.post(graphQLURL, {
       query: `query getTransactions {
-        agentInstances(
+        agentFromTransactions(
           limit: ${limit}${cursor ? `, after: "${cursor}"` : ""}
-          ${chain ? `, where: { chain: "${chain}" }` : ""}
+          where: {
+            ${chain ? `chain: "${chain}",` : ""}
+            agentInstanceId_not_in: ${JSON.stringify(excludedIds)}
+          }
           orderBy: "timestamp"
           orderDirection: "desc"
         ) {
@@ -28,30 +34,30 @@ router.get("/", async (req: any, res) => {
           }
           items {
             timestamp
-            id
-            agent {
-              image
-              name
-              description
-              codeUri
-              timestamp
+            agentInstance {
+              id
+              agent {
+                image
+                name
+                description
+                codeUri
+              }
             }
-       
           }
         }
       }`,
     });
 
-    const transactions = response?.data?.data?.agentInstances?.items.map(
+    const transactions = response?.data?.data?.agentFromTransactions?.items.map(
       (item: any) => ({
-        id: item.id,
+        id: item?.agentInstance?.id,
         timestamp: item.timestamp,
-        agent: item.agent,
+        agent: item.agentInstance.agent,
       })
     );
 
     const nextCursor =
-      response?.data?.data?.agentInstances?.pageInfo?.endCursor || null;
+      response?.data?.data?.agentFromTransactions?.pageInfo?.endCursor || null;
     if (!transactions || transactions.length === 0) {
       return res.status(200).json({
         transactions: [],

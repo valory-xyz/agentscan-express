@@ -1,5 +1,6 @@
 import axios from "axios";
 import { Router } from "express";
+import { getTransactions } from "../../services/transactions";
 
 const router = Router();
 
@@ -29,54 +30,15 @@ router.get("/", async (req: any, res) => {
       return res.status(400).json({ message: "Invalid chain parameter" });
     }
 
-    const response = await axios.post(graphQLURL, {
-      query: `query getTransactions {
-        agentFromTransactions(
-          limit: ${limit}${cursor ? `, after: "${cursor}"` : ""}
-          where: { agentInstanceId: "${instance}" }
-          ${chain ? `, chain: "${chain}"` : ""}
-          orderBy: "timestamp"
-          orderDirection: "desc"
-        ) {
-          pageInfo {
-            endCursor
-          }
-          items {
-            timestamp
-            transactionHash
-            chain
-            transaction {
-              from
-              to
-              value
-              logs {
-                items {
-                  decodedData
-                  eventName
-                }
-              }
-            }
-          }
-        }
-      }`,
-    });
-
-    const transactions = response?.data?.data?.agentFromTransactions?.items.map(
-      (item: any) => ({
-        timestamp: item.timestamp,
-        transactionHash: item.transactionHash,
-        chain: item.chain,
-        transaction: {
-          from: item.transaction.from,
-          to: item.transaction.to,
-          logs: item.transaction.logs.items,
-        },
-        transactionLink: getTransactionLink(item.chain, item.transactionHash),
-      })
+    const transactionsData = await getTransactions(
+      instance,
+      chain,
+      cursor,
+      limit
     );
 
-    const nextCursor =
-      response?.data?.data?.agentFromTransactions?.pageInfo?.endCursor || null;
+    const transactions = transactionsData.transactions;
+    const nextCursor = transactionsData.nextCursor;
 
     if (!transactions || transactions.length === 0) {
       return res.status(200).json({

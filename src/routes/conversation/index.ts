@@ -1,28 +1,26 @@
-import e, { Router } from "express";
-import { pool } from "../../initalizers/postgres";
-import {
-  generateChatResponseWithRetry,
-  generateEmbeddingWithRetry,
-} from "../../services/openai";
-import { withRetry } from "../../services/crawler";
-import openai from "../../initalizers/openai";
-
-import { amplitudeClient } from "../../initalizers/amplitude";
-import { redis } from "../../initalizers/redis";
+import { Router } from "express";
 import {
   getTeamData,
-  findRelevantContext,
   generateConversationResponse,
+  PromptType,
 } from "../../services/conversation";
 
 const router = Router();
-const CACHE_TTL = 3 * 60 * 60;
-const TEAM_CACHE_TTL = 30 * 60;
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 router.post("/", async (req: any, res) => {
-  const { question, messages, teamId } = req.body;
+  let {
+    question,
+    messages,
+    teamId,
+    type = "general",
+    instance = null,
+  } = req.body;
+
+  if (!["general", "agent"].includes(type)) {
+    return res.status(400).json({
+      message: "Invalid type. Must be either 'general' or 'agent'.",
+    });
+  }
 
   if (!question) {
     return res.status(400).json({ message: "question is required." });
@@ -38,7 +36,9 @@ router.post("/", async (req: any, res) => {
     for await (const response of generateConversationResponse(
       question,
       messages,
-      teamData
+      teamData,
+      type as PromptType,
+      instance
     )) {
       res.write(`${JSON.stringify(response)}\n\n`);
 
