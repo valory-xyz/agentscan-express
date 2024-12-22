@@ -181,6 +181,8 @@ async function streamResponse(
       message.content,
       conversationHistory,
       teamData,
+      "general",
+      null,
       false
     )) {
       if (response.error) {
