@@ -49,6 +49,7 @@ router.get("/", async (req: any, res) => {
     });
 
     const transactions = response?.data?.data?.agentFromTransactions?.items
+      .filter((item: any) => item?.agentInstance)
       .filter((item: any) => item?.agentInstance?.agent)
       .map((item: any) => ({
         id: item?.agentInstance?.id,
