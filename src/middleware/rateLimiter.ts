@@ -1,7 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { redis } from "../initalizers/redis";
-import privy from "../initalizers/privy";
-import { pool } from "../initalizers/postgres";
+
 import express from "express";
 
 interface RateLimitOptions {

@@ -1,11 +1,11 @@
 import axios from "axios";
 import { Router } from "express";
+import { graphQLURL } from "../../services/constants";
 
 const router = Router();
 
 router.get("/", async (req: any, res) => {
   try {
-    const graphQLURL = "https://agentscan-agentindexing-kx37.ponder-dev.com";
     const limit = 20;
     const cursor = req.query.cursor || null;
     const chain = req.query.chain?.toLowerCase();
