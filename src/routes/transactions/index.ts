@@ -9,7 +9,7 @@ router.get("/", async (req: any, res) => {
     const limit = 20;
     const cursor = req.query.cursor || null;
     const chain = req.query.chain?.toLowerCase();
-    const instance = req.query.instance;
+    const instance = req.query.instance?.toLowerCase();
 
     if (chain && !["base", "gnosis", "mainnet"].includes(chain)) {
       return res.status(400).json({ message: "Invalid chain parameter" });
