@@ -6,7 +6,7 @@ const router = Router();
 
 router.get("/", async (req: any, res) => {
   try {
-    const instanceId = req.query.id;
+    const instanceId = req.query.id?.toLowerCase();
 
     if (!instanceId) {
       return res.status(400).json({ message: "Instance ID is required" });
