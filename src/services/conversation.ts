@@ -443,7 +443,12 @@ export async function* generateConversationResponse(
         messages,
         system_prompt_name,
         promptType,
-        agent ? agent.agent : null,
+        agent
+          ? {
+              name: agent.agent.originalName,
+              description: agent.agent.description,
+            }
+          : null,
         transactions
       )) {
         chunkCount++;

@@ -34,6 +34,7 @@ interface Instance {
     description: string;
     codeUri: string;
     timestamp: string;
+    originalName: string;
   };
 }
 
@@ -88,6 +89,7 @@ export async function getInstanceData(instanceId: string): Promise<Instance> {
         description: result.rows[0].description,
         codeUri: result.rows[0].code_uri,
         timestamp: result.rows[0].agent_timestamp,
+        originalName: result.rows[0].name,
       },
     };
 
