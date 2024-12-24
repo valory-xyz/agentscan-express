@@ -16,6 +16,10 @@ router.post("/", async (req: any, res) => {
     instance = null,
   } = req.body;
 
+  if (instance) {
+    instance = instance.toLowerCase();
+  }
+
   if (!["general", "agent"].includes(type)) {
     return res.status(400).json({
       message: "Invalid type. Must be either 'general' or 'agent'.",

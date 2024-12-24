@@ -1,14 +1,13 @@
-import axios from "axios";
 import { Router } from "express";
-import { graphQLURL } from "../../services/constants";
+import { olasPool } from "../../initalizers/postgres";
 
 const router = Router();
 
 router.get("/", async (req: any, res) => {
   try {
     const limit = 20;
-    const cursor = req.query.cursor || null;
     const chain = req.query.chain?.toLowerCase();
+    const cursor = req.query.cursor ? parseFloat(req.query.cursor) : null;
     const excludedIds = req.query.excludedIds
       ? req.query?.excludedIds?.split(",")
       : [];
@@ -17,52 +16,85 @@ router.get("/", async (req: any, res) => {
       return res.status(400).json({ message: "Invalid chain parameter" });
     }
 
-    const response = await axios.post(graphQLURL, {
-      query: `query getTransactions {
-        agentFromTransactions(
-          limit: ${limit}${cursor ? `, after: "${cursor}"` : ""}
-          where: {
-            ${chain ? `chain: "${chain}",` : ""}
-            agentInstanceId_not_in: ${JSON.stringify(excludedIds)}
-          }
-          orderBy: "timestamp"
-          orderDirection: "desc"
-        ) {
-          pageInfo {
-            endCursor
-          }
-          items {
-            timestamp
-            agentInstance {
-              id
-              agent {
-                image
-                name
-                description
-                codeUri
-              }
-            }
-          }
+    const queryParams: any[] = [limit];
+    let paramCounter = 2;
+
+    let query = `
+      WITH RankedAgents AS (
+        SELECT 
+          ai.id AS id,
+          ai.agent_id,
+          a.image,
+          a.name,
+          a.description,
+          a.code_uri,
+          aft.timestamp,
+          tx.value AS highest_value,
+          ROW_NUMBER() OVER (PARTITION BY ai.agent_id ORDER BY tx.value DESC) as rn
+        FROM "4ecc96db-a6ba-45ec-a91b-e5c4d49fa206".agent_from_transaction AS aft
+        JOIN "4ecc96db-a6ba-45ec-a91b-e5c4d49fa206".agent_instance AS ai ON aft.agent_instance_id = ai.id
+        JOIN "4ecc96db-a6ba-45ec-a91b-e5c4d49fa206".agent AS a ON ai.agent_id = a.id
+        JOIN "4ecc96db-a6ba-45ec-a91b-e5c4d49fa206".transaction AS tx ON tx.hash = aft.transaction_hash
+        WHERE 1=1
+        ${chain ? `AND aft.chain = $${paramCounter++}` : ""}
+        ${
+          excludedIds.length > 0
+            ? `AND ai.id NOT IN (${excludedIds
+                .map((_: any, i: number) => `$${paramCounter + i}`)
+                .join(",")})`
+            : ""
         }
-      }`,
-    });
+      )
+      SELECT 
+        id,
+        agent_id,
+        image,
+        name,
+        description,
+        code_uri,
+        timestamp,
+        highest_value
+      FROM RankedAgents
+      WHERE rn = 1
+        ${cursor ? `AND highest_value < $${paramCounter++}` : ""}
+      ORDER BY highest_value DESC
+      LIMIT $1
+    `;
 
-    const transactions = response?.data?.data?.agentFromTransactions?.items
-      .filter((item: any) => item?.agentInstance)
-      .filter((item: any) => item?.agentInstance?.agent)
-      .map((item: any) => ({
-        id: item?.agentInstance?.id,
-        timestamp: item?.timestamp,
-        agent: {
-          image: item?.agentInstance?.agent?.image || null,
-          name: item?.agentInstance?.agent?.name || null,
-          description: item?.agentInstance?.agent?.description || null,
-          codeUri: item?.agentInstance?.agent?.codeUri || null,
-        },
-      }));
+    if (chain) {
+      queryParams.push(chain);
+    }
+    if (cursor) {
+      queryParams.push(cursor);
+    }
+    if (excludedIds.length > 0) {
+      queryParams.push(...excludedIds);
+    }
 
+    console.log("Query:", query);
+    console.log("Params:", queryParams);
+
+    const result = await olasPool.query(query, queryParams);
+    console.log("Number of results:", result.rows.length);
+
+    const transactions = result.rows.map((row) => ({
+      id: row.id,
+      timestamp: row.timestamp,
+      agent: {
+        image: row.image || null,
+        name: row.name || null,
+        description: row.description || null,
+        codeUri: row.code_uri || null,
+      },
+      highestValue: row.highest_value || null,
+    }));
+
+    // Calculate next cursor
     const nextCursor =
-      response?.data?.data?.agentFromTransactions?.pageInfo?.endCursor || null;
+      transactions.length === limit
+        ? transactions[transactions.length - 1].highestValue
+        : null;
+
     if (!transactions || transactions.length === 0) {
       return res.status(200).json({
         transactions: [],
@@ -70,11 +102,11 @@ router.get("/", async (req: any, res) => {
       });
     }
 
-    return res.status(200).json({ transactions, nextCursor });
+    return res.status(200).json({
+      transactions,
+      nextCursor,
+    });
   } catch (error: any) {
-    if (error.message === "No transactions found") {
-      return res.status(404).json({ message: "No transactions found" });
-    }
     console.error("Error processing transactions:", error);
     return res.status(500).json({ message: "Internal server error" });
   }

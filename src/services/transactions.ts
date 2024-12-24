@@ -1,6 +1,7 @@
 import axios from "axios";
 import { redis } from "../initalizers/redis";
 import { graphQLURL } from "./constants";
+import { olasPool } from "../initalizers/postgres";
 
 const CACHE_TTL = 15 * 60;
 const TX_TTL = 4 * 60;
@@ -45,27 +46,39 @@ export async function getInstanceData(instanceId: string): Promise<Instance> {
       return JSON.parse(cached);
     }
 
-    const response = await axios.post(graphQLURL, {
-      query: `query getInstance {
-        agentInstance(id: "${instanceId}") {
-          id
-          timestamp
-          agent {
-            id
-            image
-            name
-            description
-            codeUri
-            timestamp
-          }
-        }
-      }`,
-    });
+    const query = `
+      SELECT 
+        ai.id,
+        ai.timestamp,
+        a.id as agent_id,
+        a.image,
+        a.name,
+        a.description,
+        a.code_uri,
+        a.timestamp as agent_timestamp
+      FROM "4ecc96db-a6ba-45ec-a91b-e5c4d49fa206".agent_instance ai
+      JOIN "4ecc96db-a6ba-45ec-a91b-e5c4d49fa206".agent a ON ai.agent_id = a.id
+      WHERE ai.id = $1
+    `;
 
-    const instance = response?.data?.data?.agentInstance;
-    if (!instance) {
+    const result = await olasPool.query(query, [instanceId]);
+
+    if (!result.rows[0]) {
       throw new Error("Instance not found");
     }
+
+    const instance = {
+      id: result.rows[0].id,
+      timestamp: result.rows[0].timestamp,
+      agent: {
+        id: result.rows[0].agent_id,
+        image: result.rows[0].image,
+        name: result.rows[0].name,
+        description: result.rows[0].description,
+        codeUri: result.rows[0].code_uri,
+        timestamp: result.rows[0].agent_timestamp,
+      },
+    };
 
     redis.set(cacheKey, JSON.stringify(instance), { EX: CACHE_TTL });
     return instance;
@@ -80,7 +93,7 @@ export async function getInstanceData(instanceId: string): Promise<Instance> {
 
 export async function getTransactions(
   instance: string,
-  chain?: string,
+  chain?: string | null,
   cursor?: string | null,
   limit: number = 20
 ): Promise<{ transactions: Transaction[]; nextCursor: string | null }> {
@@ -88,8 +101,7 @@ export async function getTransactions(
     throw new Error("Instance ID is required");
   }
 
-  const normalizedChain = chain?.startsWith("0x") ? "mainnet" : chain;
-
+  const normalizedChain = chain?.startsWith("0x") ? "mainnet" : chain || null;
   const cacheKey = `transactions:${instance}:${normalizedChain}:${cursor}:${limit}`;
 
   try {
@@ -99,50 +111,78 @@ export async function getTransactions(
       return JSON.parse(cached);
     }
 
-    const response = await axios.post(graphQLURL, {
-      query: `query getTransactions {
-        agentFromTransactions(
-          limit: ${limit}${cursor ? `, after: "${cursor}"` : ""}
-          where: { agentInstanceId: "${instance}" }
-          ${normalizedChain ? `, chain: "${normalizedChain}"` : ""}
-          orderBy: "timestamp"
-          orderDirection: "desc"
-        ) {
-          pageInfo {
-            endCursor
-          }
-          items {
-            timestamp
-            transactionHash
-            transaction {
-              from
-              to
-              chain
-              value
-              decodedFunction
-              logs {
-                items {
-                  decodedData
-                  eventName
-                  address
-                }
-              }
-            }
-          }
-        }
-      }`,
+    const queryParams: any[] = [instance, limit];
+    let paramCounter = 3;
+
+    let query = `
+      SELECT 
+        aft.timestamp,
+        aft.transaction_hash,
+        aft.chain,
+        tx.from as from_addr,
+        tx.to as to_addr,
+        tx.value,
+        l.decoded_data,
+        l.event_name,
+        l.address
+      FROM "4ecc96db-a6ba-45ec-a91b-e5c4d49fa206".agent_from_transaction aft
+      JOIN "4ecc96db-a6ba-45ec-a91b-e5c4d49fa206".transaction tx ON tx.hash = aft.transaction_hash
+      LEFT JOIN "4ecc96db-a6ba-45ec-a91b-e5c4d49fa206".log l ON l.transaction_hash = aft.transaction_hash
+      WHERE aft.agent_instance_id = $1
+    `;
+
+    if (normalizedChain) {
+      query += ` AND aft.chain = $${paramCounter}`;
+      queryParams.push(normalizedChain);
+      paramCounter++;
+    }
+
+    if (cursor) {
+      query += ` AND aft.timestamp < $${paramCounter}`;
+      queryParams.push(cursor);
+      paramCounter++;
+    }
+
+    query += ` ORDER BY aft.timestamp DESC LIMIT $2`;
+
+    const dbResult = await olasPool.query(query, queryParams);
+
+    const txMap = new Map();
+    dbResult.rows.forEach((row) => {
+      if (!txMap.has(row.transaction_hash)) {
+        txMap.set(row.transaction_hash, {
+          timestamp: row.timestamp,
+          transactionHash: row.transaction_hash,
+          chain: row.chain || "mainnet",
+          transaction: {
+            from: row.from_addr,
+            to: row.to_addr,
+            value: row.value,
+            logs: [],
+          },
+        });
+      }
+
+      if (row.event_name) {
+        txMap.get(row.transaction_hash).transaction.logs.push({
+          decodedData: row.decoded_data,
+          eventName: row.event_name,
+          address: row.address,
+        });
+      }
     });
 
-    const result = {
-      transactions:
-        response?.data?.data?.agentFromTransactions?.items?.map(
-          formatTransaction
-        ) || [],
-      nextCursor:
-        response?.data?.data?.agentFromTransactions?.pageInfo?.endCursor ||
-        null,
-    };
+    const transactions = Array.from(txMap.values()).map((tx) => ({
+      ...tx,
+      transactionLink: getTransactionLink(tx.chain, tx.transactionHash),
+    }));
 
+    const nextCursor =
+      transactions.length === limit
+        ? transactions[transactions.length - 1].timestamp
+        : null;
+
+    const result = { transactions, nextCursor };
     await redis.set(cacheKey, JSON.stringify(result), { EX: TX_TTL });
     return result;
   } catch (error) {
