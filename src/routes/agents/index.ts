@@ -71,11 +71,7 @@ router.get("/", async (req: any, res) => {
       queryParams.push(...excludedIds);
     }
 
-    console.log("Query:", query);
-    console.log("Params:", queryParams);
-
     const result = await olasPool.query(query, queryParams);
-    console.log("Number of results:", result.rows.length);
 
     const transactions = result.rows.map((row) => ({
       id: row.id,
@@ -89,7 +85,6 @@ router.get("/", async (req: any, res) => {
       highestValue: row.highest_value || null,
     }));
 
-    // Calculate next cursor
     const nextCursor =
       transactions.length === limit
         ? transactions[transactions.length - 1].highestValue

@@ -534,8 +534,6 @@ export async function* generateChatResponseWithRetry(
     transactions
   );
 
-  console.log("systemPrompt", systemPrompt);
-
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
