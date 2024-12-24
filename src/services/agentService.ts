@@ -1,5 +1,6 @@
 import { olasPool } from "../initalizers/postgres";
 import { redis } from "../initalizers/redis";
+import { formatAgentName } from "./transactions";
 
 const CACHE_DURATION = 60 * 4; // 4 minutes
 
@@ -112,7 +113,7 @@ export async function getAgents({
     timestamp: row.timestamp,
     agent: {
       image: row.image || null,
-      name: row.name || null,
+      name: formatAgentName(row.name || "", row.id),
       description: row.description || null,
       codeUri: row.code_uri || null,
     },

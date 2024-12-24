@@ -84,7 +84,7 @@ export async function getInstanceData(instanceId: string): Promise<Instance> {
       agent: {
         id: result.rows[0].agent_id,
         image: result.rows[0].image,
-        name: result.rows[0].name,
+        name: formatAgentName(result.rows[0].name || "", result.rows[0].id),
         description: result.rows[0].description,
         codeUri: result.rows[0].code_uri,
         timestamp: result.rows[0].agent_timestamp,
@@ -266,4 +266,24 @@ function getTransactionLink(chain: string | undefined, txHash: string): string {
     default:
       return `https://etherscan.io/tx/${txHash}`;
   }
+}
+
+export function formatAgentName(agentName: string, instanceId: string): string {
+  const simpleName =
+    agentName
+      .split("/")
+      .pop()
+      ?.split(":")[0]
+      ?.replace(/^\w/, (c) => c.toUpperCase())
+      ?.replace(/_/g, " ") || agentName;
+  const explorerLink = getExplorerLink(instanceId);
+
+  return `${simpleName} (${explorerLink})`;
+}
+
+function getExplorerLink(address: string): string {
+  const shortAddress = `${address.substring(0, 6)}...${address.substring(
+    address.length - 4
+  )}`;
+  return `[${shortAddress}](https://blockscan.com/address/${address})`;
 }
