@@ -43,10 +43,11 @@ export async function getInstanceData(instanceId: string): Promise<Instance> {
   try {
     const cached = await redis.get(cacheKey);
     if (cached) {
+      console.log("Returning cached data in getInstanceData");
       return JSON.parse(cached);
     }
 
-    const query = `
+    const newSchemaQuery = `
       SELECT 
         ai.id,
         ai.timestamp,
@@ -56,12 +57,22 @@ export async function getInstanceData(instanceId: string): Promise<Instance> {
         a.description,
         a.code_uri,
         a.timestamp as agent_timestamp
-      FROM "4ecc96db-a6ba-45ec-a91b-e5c4d49fa206".agent_instance ai
-      JOIN "4ecc96db-a6ba-45ec-a91b-e5c4d49fa206".agent a ON ai.agent_id = a.id
+      FROM "log-df28".agent_instance ai
+      JOIN "log-df28".agent a ON ai.agent_id = a.id
       WHERE ai.id = $1
     `;
 
-    const result = await olasPool.query(query, [instanceId]);
+    let result;
+    try {
+      result = await olasPool.query(newSchemaQuery, [instanceId]);
+    } catch (error) {
+      console.log("Failed to query log-df28 schema, falling back:", error);
+      const fallbackQuery = newSchemaQuery.replace(
+        /\"log-df28\"/g,
+        '"4ecc96db-a6ba-45ec-a91b-e5c4d49fa206"'
+      );
+      result = await olasPool.query(fallbackQuery, [instanceId]);
+    }
 
     if (!result.rows[0]) {
       throw new Error("Instance not found");
@@ -91,6 +102,14 @@ export async function getInstanceData(instanceId: string): Promise<Instance> {
   }
 }
 
+function encodeCursor(cursor: string | number): string {
+  return Buffer.from(String(cursor)).toString("base64");
+}
+
+function decodeCursor(cursor: string): string {
+  return Buffer.from(cursor, "base64").toString("utf-8");
+}
+
 export async function getTransactions(
   instance: string,
   chain?: string | null,
@@ -102,12 +121,13 @@ export async function getTransactions(
   }
 
   const normalizedChain = chain?.startsWith("0x") ? "mainnet" : chain || null;
-  const cacheKey = `transactions:${instance}:${normalizedChain}:${cursor}:${limit}`;
+  const decodedCursor = cursor ? decodeCursor(cursor) : null;
+  const cacheKey = `transactions:${instance}:${normalizedChain}:${decodedCursor}:${limit}`;
 
   try {
     const cached = await redis.get(cacheKey);
     if (cached) {
-      console.log("Returning cached data:");
+      console.log("Returning cached data in getTransactions");
       return JSON.parse(cached);
     }
 
@@ -115,20 +135,17 @@ export async function getTransactions(
     let paramCounter = 3;
 
     let query = `
-      SELECT 
-        aft.timestamp,
-        aft.transaction_hash,
-        aft.chain,
-        tx.from as from_addr,
-        tx.to as to_addr,
-        tx.value,
-        l.decoded_data,
-        l.event_name,
-        l.address
-      FROM "4ecc96db-a6ba-45ec-a91b-e5c4d49fa206".agent_from_transaction aft
-      JOIN "4ecc96db-a6ba-45ec-a91b-e5c4d49fa206".transaction tx ON tx.hash = aft.transaction_hash
-      LEFT JOIN "4ecc96db-a6ba-45ec-a91b-e5c4d49fa206".log l ON l.transaction_hash = aft.transaction_hash
-      WHERE aft.agent_instance_id = $1
+      WITH filtered_transactions AS (
+        SELECT DISTINCT ON (aft.transaction_hash)
+          aft.timestamp,
+          aft.transaction_hash,
+          aft.chain,
+          tx.from as from_addr,
+          tx.to as to_addr,
+          tx.value
+        FROM "log-df28".agent_from_transaction aft
+        JOIN "log-df28".transaction tx ON tx.hash = aft.transaction_hash
+        WHERE aft.agent_instance_id = $1
     `;
 
     if (normalizedChain) {
@@ -137,54 +154,66 @@ export async function getTransactions(
       paramCounter++;
     }
 
-    if (cursor) {
+    if (decodedCursor) {
       query += ` AND aft.timestamp < $${paramCounter}`;
-      queryParams.push(cursor);
+      queryParams.push(decodedCursor);
       paramCounter++;
     }
 
-    query += ` ORDER BY aft.timestamp DESC LIMIT $2`;
+    query += `
+        ORDER BY aft.transaction_hash, aft.timestamp DESC
+        LIMIT $2
+      )
+      SELECT 
+        ft.*,
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'decoded_data', l.decoded_data,
+              'event_name', l.event_name,
+              'address', l.address
+            )
+          ) FILTER (WHERE l.transaction_hash IS NOT NULL),
+          '[]'
+        ) as logs
+      FROM filtered_transactions ft
+      LEFT JOIN "log-df28".log l ON l.transaction_hash = ft.transaction_hash
+      GROUP BY ft.timestamp, ft.transaction_hash, ft.chain, ft.from_addr, ft.to_addr, ft.value
+      ORDER BY ft.timestamp DESC
+    `;
 
-    const dbResult = await olasPool.query(query, queryParams);
+    let result;
+    try {
+      result = await olasPool.query(query, queryParams);
+    } catch (error) {
+      console.log("Failed to query log-df28 schema, falling back:", error);
+      query = query.replace(
+        /\"log-df28\"/g,
+        '"4ecc96db-a6ba-45ec-a91b-e5c4d49fa206"'
+      );
+      result = await olasPool.query(query, queryParams);
+    }
 
-    const txMap = new Map();
-    dbResult.rows.forEach((row) => {
-      if (!txMap.has(row.transaction_hash)) {
-        txMap.set(row.transaction_hash, {
-          timestamp: row.timestamp,
-          transactionHash: row.transaction_hash,
-          chain: row.chain || "mainnet",
-          transaction: {
-            from: row.from_addr,
-            to: row.to_addr,
-            value: row.value,
-            logs: [],
-          },
-        });
-      }
-
-      if (row.event_name) {
-        txMap.get(row.transaction_hash).transaction.logs.push({
-          decodedData: row.decoded_data,
-          eventName: row.event_name,
-          address: row.address,
-        });
-      }
-    });
-
-    const transactions = Array.from(txMap.values()).map((tx) => ({
-      ...tx,
-      transactionLink: getTransactionLink(tx.chain, tx.transactionHash),
-    }));
+    const transactions = result.rows.map((row) =>
+      formatTransaction({
+        timestamp: row.timestamp,
+        transaction_hash: row.transaction_hash,
+        chain: row.chain,
+        from_addr: row.from_addr,
+        to_addr: row.to_addr,
+        value: row.value,
+        logs: row.logs === "[null]" ? [] : row.logs,
+      })
+    );
 
     const nextCursor =
       transactions.length === limit
-        ? transactions[transactions.length - 1].timestamp
+        ? encodeCursor(transactions[transactions.length - 1].timestamp)
         : null;
 
-    const result = { transactions, nextCursor };
-    await redis.set(cacheKey, JSON.stringify(result), { EX: TX_TTL });
-    return result;
+    const resultObj = { transactions, nextCursor };
+    redis.set(cacheKey, JSON.stringify(resultObj), { EX: TX_TTL });
+    return resultObj;
   } catch (error) {
     console.error("Error fetching transactions:", error);
     if (axios.isAxiosError(error)) {
@@ -193,28 +222,35 @@ export async function getTransactions(
         data: error.response?.data,
       });
     }
-    await redis.set(cacheKey, JSON.stringify({ error: true }), {
+    redis.set(cacheKey, JSON.stringify({ error: true }), {
       EX: ERROR_TTL,
     });
     throw error;
   }
 }
 
-function formatTransaction(item: any): Transaction {
-  const normalizedChain = item?.transaction?.chain || "mainnet";
+export function formatTransaction(item: any): Transaction {
+  const normalizedChain = item?.chain || item?.transaction?.chain || "mainnet";
+  const logs = item.transaction?.logs?.items || item.transaction?.logs || [];
 
   return {
     timestamp: item.timestamp,
-    transactionHash: item.transactionHash,
+    transactionHash: item.transactionHash || item.transaction_hash,
     chain: normalizedChain,
     transaction: {
-      from: item.transaction.from,
-      to: item.transaction.to,
-      value: item.transaction.value,
-
-      logs: item.transaction.logs.items,
+      from: item.transaction?.from || item.from_addr,
+      to: item.transaction?.to || item.to_addr,
+      value: item.transaction?.value || item.value,
+      logs: logs.map((log: any) => ({
+        decodedData: log.decodedData || log.decoded_data,
+        eventName: log.eventName || log.event_name,
+        address: log.address,
+      })),
     },
-    transactionLink: getTransactionLink(normalizedChain, item.transactionHash),
+    transactionLink: getTransactionLink(
+      normalizedChain,
+      item.transactionHash || item.transaction_hash
+    ),
   };
 }
 
