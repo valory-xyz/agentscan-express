@@ -189,7 +189,7 @@ export async function getTransactions(
     let result;
     try {
       result = await olasPool.query(query, queryParams);
-      console.log("result logs", result.rows.map((row) => row.logs));
+
     } catch (error) {
       console.log("Failed to query log-df28 schema, falling back:", error);
       query = query.replace(
@@ -242,7 +242,6 @@ export function formatTransaction(item: any): Transaction {
     eventName: log.eventName || log.event_name,
     address: log.address,
   }));
-  console.log("logs", logs);
 
   return {
     timestamp: item.timestamp,
