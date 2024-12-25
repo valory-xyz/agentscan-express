@@ -169,14 +169,16 @@ export async function getTransactions(
       SELECT 
         ft.*,
         COALESCE(
-          json_agg(
-            json_build_object(
-              'decoded_data', l.decoded_data,
-              'event_name', l.event_name,
-              'address', l.address
-            )
-          ) FILTER (WHERE l.transaction_hash IS NOT NULL),
-          '[]'
+          jsonb_agg(
+            CASE WHEN l.transaction_hash IS NOT NULL THEN
+              jsonb_build_object(
+                'decoded_data', l.decoded_data,
+                'event_name', l.event_name,
+                'address', l.address
+              )
+            END
+          ) FILTER (WHERE l.transaction_hash IS NOT NULL AND l.decoded_data IS NOT NULL),
+          '[]'::jsonb
         ) as logs
       FROM filtered_transactions ft
       LEFT JOIN "log-df28".log l ON l.transaction_hash = ft.transaction_hash
@@ -187,6 +189,7 @@ export async function getTransactions(
     let result;
     try {
       result = await olasPool.query(query, queryParams);
+      console.log("result logs", result.rows.map((row) => row.logs));
     } catch (error) {
       console.log("Failed to query log-df28 schema, falling back:", error);
       query = query.replace(
@@ -204,7 +207,7 @@ export async function getTransactions(
         from_addr: row.from_addr,
         to_addr: row.to_addr,
         value: row.value,
-        logs: row.logs === "[null]" ? [] : row.logs,
+        logs: Array.isArray(row.logs) ? row.logs.filter(Boolean) : [],
       })
     );
 
@@ -233,7 +236,13 @@ export async function getTransactions(
 
 export function formatTransaction(item: any): Transaction {
   const normalizedChain = item?.chain || item?.transaction?.chain || "mainnet";
-  const logs = item.transaction?.logs?.items || item.transaction?.logs || [];
+  
+  const logs = (item.logs || []).map((log: any) => ({
+    decodedData: log.decodedData || log.decoded_data,
+    eventName: log.eventName || log.event_name,
+    address: log.address,
+  }));
+  console.log("logs", logs);
 
   return {
     timestamp: item.timestamp,
@@ -243,11 +252,7 @@ export function formatTransaction(item: any): Transaction {
       from: item.transaction?.from || item.from_addr,
       to: item.transaction?.to || item.to_addr,
       value: item.transaction?.value || item.value,
-      logs: logs.map((log: any) => ({
-        decodedData: log.decodedData || log.decoded_data,
-        eventName: log.eventName || log.event_name,
-        address: log.address,
-      })),
+      logs: logs,
     },
     transactionLink: getTransactionLink(
       normalizedChain,
