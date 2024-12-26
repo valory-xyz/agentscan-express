@@ -2,7 +2,7 @@ import { olasPool } from "../initalizers/postgres";
 import { redis } from "../initalizers/redis";
 import { formatAgentName } from "./transactions";
 
-const CACHE_DURATION = 60 * 4; // 4 minutes
+const CACHE_DURATION = 60 * 10; // 10 minutes
 
 interface AgentTransaction {
   id: string;
