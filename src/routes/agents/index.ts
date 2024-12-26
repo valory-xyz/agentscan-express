@@ -19,7 +19,7 @@ router.get("/", async (req: any, res) => {
     return res.status(200).json(result);
   } catch (error: any) {
     console.error("Error processing transactions:", error);
-    return res.status(500).json({ message: "Internal server error" });
+    return res.status(500).json({ message: error.message });
   }
 });
 

@@ -97,18 +97,51 @@ export async function getAgents({
   `;
 
   let result;
-  try {
-    result = await olasPool.query(query, queryParams);
-  } catch (error) {
-    console.log("Failed to query log-df28 schema, falling back:", error);
-    const fallbackQuery = query.replace(
-      /\"log-df28\"/g,
-      '"4ecc96db-a6ba-45ec-a91b-e5c4d49fa206"'
-    );
-    result = await olasPool.query(fallbackQuery, queryParams);
+  const maxRetries = 3;
+  let retryCount = 0;
+
+  while (retryCount < maxRetries) {
+    try {
+      result = await olasPool.query(query, queryParams);
+      break;
+    } catch (error: any) {
+      console.error(`Query attempt ${retryCount + 1} failed:`, error.message);
+
+      if (error.message.includes("shared memory segment")) {
+        if (retryCount === maxRetries - 1) {
+          throw new Error(
+            "Database is currently under heavy load. Please try again later."
+          );
+        }
+        await new Promise((resolve) =>
+          setTimeout(resolve, 1000 * (retryCount + 1))
+        );
+        retryCount++;
+        continue;
+      }
+
+      try {
+        const fallbackQuery = query.replace(
+          /\"log-df28\"/g,
+          '"4ecc96db-a6ba-45ec-a91b-e5c4d49fa206"'
+        );
+        result = await olasPool.query(fallbackQuery, queryParams);
+        break;
+      } catch (fallbackError) {
+        console.error("Fallback query failed:", fallbackError);
+        throw fallbackError;
+      }
+    }
   }
 
-  const transactions = result.rows.map((row) => ({
+  if (!result) {
+    return {
+      transactions: [],
+      nextCursor: null,
+    };
+  }
+
+  const transactions = result?.rows.map((row) => ({
     id: row.id,
     timestamp: row.timestamp,
     agent: {
