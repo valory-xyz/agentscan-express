@@ -12,7 +12,9 @@
     "predev": "npx playwright install chromium",
     "dev": "npx tsx watch src/index.ts",
     "build": "tsc",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dump_schema": "./scripts/dump_schema.sh",
+    "init_db": "./scripts/init_db.sh"
   },
   "author": "",
   "license": "ISC",
