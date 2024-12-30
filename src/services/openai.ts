@@ -14,8 +14,7 @@ export const TOKEN_OVERLAP = 25; // Reduced from 50
 export const MIN_CHUNK_LENGTH = 100;
 export const ABSOLUTE_MAX_TOKENS = 7000; // Reduced from 8000
 
-// Add this type definition at the top with other interfaces
-type UserType = "developer" | "consumer" | "business";
+type PromptType = "general" | "agent";
 
 // Helper function to estimate tokens (rough approximation)
 export function estimateTokens(text: string): number {
@@ -248,7 +247,6 @@ export async function generateEmbeddingWithRetry(
   text: string,
   options?: RetryOptions
 ): Promise<any> {
-  // Check cache first
   const cached = embeddingCache.get(text);
   if (cached) return cached;
 
@@ -326,70 +324,174 @@ interface DocumentReference {
   content: string;
 }
 
-// Add this validation utility
-function extractValidLinks(contexts: DocumentReference[]): Map<string, string> {
+// First, update extractValidLinks to accept transactions
+function extractValidLinks(
+  contexts: DocumentReference[],
+  transactions?: any[]
+): Map<string, string> {
   const validLinks = new Map<string, string>();
+
   contexts.forEach((ctx) => {
     validLinks.set(ctx.name.toLowerCase(), ctx.location);
-    // Extract any additional links from the content if they follow a specific pattern
-    // For example: [link_text](url)
+
     const linkPattern = /\[([^\]]+)\]\(([^)]+)\)/g;
     let match;
     while ((match = linkPattern.exec(ctx.content)) !== null) {
       validLinks.set(match[1].toLowerCase(), match[2]);
     }
   });
+
+  // Add transaction links
+  if (transactions?.length) {
+    transactions.forEach((tx, index) => {
+      if (tx.transactionLink) {
+        validLinks.set(`transaction ${index + 1}`, tx.transactionLink);
+        validLinks.set(tx.transactionHash.toLowerCase(), tx.transactionLink);
+      }
+    });
+  }
+
   return validLinks;
+}
+
+function formatAddress(address: string, chain: string = "mainnet"): string {
+  const abbreviated = `${address.slice(0, 5)}...${address.slice(-4)}`;
+  const explorerUrl =
+    chain === "mainnet"
+      ? `https://etherscan.io/address/${address}`
+      : chain === "gnosis"
+        ? `https://gnosisscan.io/address/${address}`
+        : `https://basescan.org/address/${address}`;
+  return `[${abbreviated}](${explorerUrl})`;
 }
 
 function createSystemPrompt(
   context: string,
   validLinks: Map<string, string>,
   system_prompt_name: string,
-  userType: UserType = "consumer"
+  promptType: PromptType = "general",
+  agent?: { name: string; description: string } | null,
+  transactions?: any[]
 ): ChatCompletionMessageParam {
-  const linkList = Array.from(validLinks.entries())
-    .map(([text, url]) => `- ${text}: ${url}`)
-    .join("\n");
-
-  const personalityTraits = {
-    developer: `
-- I provide technical, implementation-focused responses
-- I include code examples when relevant
-- I reference API documentation and technical specifications
-- I assume familiarity with programming concepts
-- I can discuss architecture and best practices
-- I use technical terminology appropriately`,
-    consumer: `
-- I avoid technical jargon unless necessary
-- I explain concepts in simple, accessible terms
-- I focus on practical use cases and benefits
-- I provide step-by-step guidance when needed
-- I use analogies to explain complex concepts
-- I emphasize user-friendly features and interfaces`,
-    business: `
-- I focus on business value and use cases
-- I discuss integration and scalability aspects
-- I emphasize ROI and business benefits
-- I reference case studies when available
-- I balance technical and business perspectives
-- I consider enterprise requirements and concerns`,
-  };
-
-  return {
-    role: "system",
-    content: `I'm Andy, and I speak directly to users about my capabilities and expertise with the ${system_prompt_name}. I avoid unnecessary greetings and get straight to helping.
+  const promptTemplates = {
+    general: `I'm Andy, and I speak directly to users about my capabilities and expertise with the ${system_prompt_name}. I avoid unnecessary greetings and get straight to helping.
 
 About me:
 - I'm an AI agent built on the ${system_prompt_name}
 - I specialize in helping you understand and work with ${system_prompt_name} technology
-- I can assist you with technical questions, documentation, practical implementation, and pointing you to ${system_prompt_name} resources
+- I excel at analyzing transaction logs, ABIs, and smart contract interactions
+- I can decode and explain complex transaction data and event logs
+- I can assist you with technical questions, documentation, and practical implementation
+- I can help you create and implement custom agents (with appropriate disclaimers)
+- I provide code examples and implementation guidance when requested
 - I aim to be friendly while maintaining technical accuracy in our conversations
 
-${personalityTraits[userType]}
+When helping with agent creation:
+- I provide detailed code examples and explanations
+- I include necessary contract interfaces and implementations
+- I explain key considerations and best practices
+- I always include appropriate risk disclaimers
+- I emphasize the importance of testing and security
+- I suggest ways to improve agent reliability and efficiency`,
+
+    agent: `I'm Andy, an AI specialized in analyzing on-chain agent activities, transaction logs, and smart contract interactions. I provide detailed insights about agent behavior, transaction patterns, and protocol mechanics with a focus on technical details in logs and ABIs.
+
+${
+  agent
+    ? `I am ${agent.name}.
+${agent.description}
+
+I can help you understand:
+- My transaction history and behavior patterns
+- My decoded transaction logs, events, and function calls
+- The ABI specifications I implement
+- My contract interactions and their encoded data
+- My transaction flows across multiple contracts
+- My low-level EVM interactions and their meaning
+- My key protocol interactions and their significance
+- How I operate within the OLAS ecosystem
+- How to create similar agents (with appropriate disclaimers)
+- Implementation details and code examples for agent development
+
+ANALYSIS APPROACH:
+- I examine my transaction logs and decoded data for detailed insights
+- I interpret my ABI specifications to explain my interfaces
+- I analyze my event logs and their parameters thoroughly
+- I trace my function calls and their encoded parameters
+- I identify patterns in my contract interactions and data usage
+- I explain my technical details in clear, accessible terms
+- I focus on factual, on-chain evidence in my analysis
+- I provide implementation guidance when requested`
+    : ""
+}
+
+KEY FOCUS AREAS:
+- Detailed transaction log analysis and interpretation
+- ABI specification and implementation understanding
+- Event log decoding and parameter explanation
+- Function call tracing and parameter decoding
+- Smart contract interaction analysis
+- Protocol mechanics and agent behavior
+- Technical accuracy in blockchain data interpretation
+- Agent development guidance and code examples
+- Implementation best practices and security considerations
+
+When providing agent implementation guidance:
+- I include necessary disclaimers about risks and testing requirements
+- I provide detailed code examples with explanations
+- I emphasize security best practices and potential pitfalls
+- I suggest testing strategies and validation approaches
+- I recommend ways to ensure agent reliability and efficiency`,
+  };
+
+  let transactionContext = "";
+  if (transactions && transactions.length > 0) {
+    const recentTransactions = transactions.slice(-5);
+    transactionContext = `
+RECENT TRANSACTIONS:
+${recentTransactions
+  .map((tx, index) => {
+    const timestamp = new Date(Number(tx.timestamp) * 1000).toISOString();
+    const value = tx.transaction.value
+      ? BigInt(tx.transaction.value).toString()
+      : "0";
+
+    return `
+Transaction ${index + 1}:
+Hash: ${tx.transactionHash}
+Chain: ${tx.chain}
+Timestamp: ${timestamp}
+From: ${formatAddress(tx.transaction.from, tx.chain)}
+To: ${tx.transaction.to ? formatAddress(tx.transaction.to, tx.chain) : "N/A"}
+Value: ${value}
+Link: ${tx.transactionLink}`;
+  })
+  .join("\n---\n")}
+`;
+  }
+
+  const validLinksWithTransactions = extractValidLinks(
+    Array.from(validLinks.entries()).map(([name, location]) => ({
+      name,
+      location,
+      type: "link",
+      content: "",
+    })),
+    transactions
+  );
+  const linkList = Array.from(validLinksWithTransactions.entries())
+    .map(([name, url]) => `- ${name}: ${url}`)
+    .join("\n");
+
+  return {
+    role: "system",
+    content:
+      promptTemplates[promptType] +
+      `\n\nCONTEXT:
+${transactionContext}
 
 IMPORTANT: I can ONLY reference these validated links in my responses:
-${linkList}
+${linkList}, as well as links to a block explorer for the chain the transaction was on in the format [0xABC...XYZ](explorer-link)
 
 I have access to this context:
 ${context}
@@ -408,7 +510,10 @@ How I communicate:
   };
 }
 
-function formatContextForPrompt(contexts: any[]): string {
+function formatContextForPrompt(
+  contexts: any[],
+  agent?: { name: string; description: string } | null
+): string {
   return contexts
     .map((ctx, index) => {
       const name = ctx.name;
@@ -432,14 +537,22 @@ ${ctx.content}
 export async function* generateChatResponseWithRetry(
   context: DocumentReference[],
   messages: ChatCompletionMessageParam[],
-  system_prompt_name: string
+  system_prompt_name: string,
+  promptType: PromptType = "general",
+  agent?: { name: string; description: string } | null,
+  transactions?: any[]
 ) {
   const contextString = formatContextForPrompt(context);
-  const validLinks = extractValidLinks(context);
+
+  const validLinks = extractValidLinks(context, transactions);
+
   const systemPrompt = createSystemPrompt(
     contextString,
     validLinks,
-    system_prompt_name
+    system_prompt_name,
+    promptType,
+    agent,
+    transactions
   );
 
   try {
@@ -448,7 +561,7 @@ export async function* generateChatResponseWithRetry(
       messages: [systemPrompt, ...messages],
       temperature: 0.7,
       max_tokens: 1250,
-      stream: true, // Always stream
+      stream: true,
     });
 
     for await (const chunk of response as any) {

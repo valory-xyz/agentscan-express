@@ -9,6 +9,17 @@ export const config = {
     port: parseInt(process.env.REDIS_PORT || "6379", 10),
     url: process.env.REDIS_URL,
   },
+  olasPostgres: {
+    user: process.env.OLAS_DB_USER || "postgres",
+    password: process.env.OLAS_DB_PASSWORD,
+    host: process.env.OLAS_DB_HOST,
+    port: parseInt(process.env.OLAS_DB_PORT || "5432", 10),
+    database: process.env.OLAS_DB_NAME,
+    ssl:
+      process.env.OLAS_DB_SSL === "true"
+        ? { rejectUnauthorized: false }
+        : undefined,
+  },
   postgres: {
     user: process.env.POSTGRES_USER || "postgres",
     host: process.env.POSTGRES_HOST || "127.0.0.1",

@@ -10,15 +10,28 @@ const pool = new Pool({
   ssl: config.postgres.ssl,
 });
 
+const olasPool = new Pool({
+  host: config.olasPostgres.host,
+  port: config.olasPostgres.port,
+  user: config.olasPostgres.user,
+  password: config.olasPostgres.password,
+  database: config.olasPostgres.database,
+  ssl: config.olasPostgres.ssl,
+});
+
+// Test both connections
 (async () => {
   const client = await pool.connect();
+  const olasClient = await olasPool.connect();
   try {
-    console.log("Connected to the database");
+    console.log("Connected to the main database");
+    console.log("Connected to the OLAS database");
   } catch (err) {
     console.error("Error executing test query:", err);
   } finally {
     client.release();
+    olasClient.release();
   }
-})().catch((err) => console.error("Error connecting to the database", err));
+})().catch((err) => console.error("Error connecting to the databases", err));
 
-export { pool };
+export { pool, olasPool };

@@ -43,7 +43,7 @@
     "node-cron": "^3.0.3",
     "node-fetch": "^3.3.2",
     "open-graph-scraper": "^6.8.2",
-    "openai": "^4.68.4",
+    "openai": "^4.77.0",
     "p-queue": "^8.0.1",
     "pdf-parse": "^1.1.1",
     "pg": "^8.13.1",

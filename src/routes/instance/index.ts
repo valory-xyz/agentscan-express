@@ -1,35 +1,18 @@
 import axios from "axios";
 import { Router } from "express";
+import { getInstanceData } from "../../services/transactions";
 
 const router = Router();
 
 router.get("/", async (req: any, res) => {
   try {
-    const graphQLURL =
-      "https://agentscan-agentindexing-kx37-uncomment-void.ponder-dev.com";
-    const instanceId = req.query.id;
+    const instanceId = req.query.id?.toLowerCase();
 
     if (!instanceId) {
       return res.status(400).json({ message: "Instance ID is required" });
     }
 
-    const response = await axios.post(graphQLURL, {
-      query: `query getInstance {
-        agentInstance(id: "${instanceId}") {
-          id
-          timestamp
-          agent {
-            image
-            name
-            description
-            codeUri
-            timestamp
-          }
-        }
-      }`,
-    });
-
-    const instance = response?.data?.data?.agentInstance;
+    const instance = await getInstanceData(instanceId);
 
     if (!instance) {
       return res.status(404).json({ message: "Instance not found" });
@@ -44,31 +27,13 @@ router.get("/", async (req: any, res) => {
 
 router.get("/", async (req: any, res) => {
   try {
-    const graphQLURL =
-      "https://agentscan-agentindexing-kx37-uncomment-void.ponder-dev.com";
     const instanceId = req.query.id;
 
     if (!instanceId) {
       return res.status(400).json({ message: "Instance ID is required" });
     }
 
-    const response = await axios.post(graphQLURL, {
-      query: `query getInstance {
-          agentInstance(id: "${instanceId}") {
-            id
-            timestamp
-            agent {
-              image
-              name
-              description
-              codeUri
-              timestamp
-            }
-          }
-        }`,
-    });
-
-    const instance = response?.data?.data?.agentInstance;
+    const instance = await getInstanceData(instanceId);
 
     if (!instance) {
       return res.status(404).json({ message: "Instance not found" });
