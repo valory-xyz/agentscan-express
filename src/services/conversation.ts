@@ -168,7 +168,6 @@ async function fetchCodeEmbeddingsGeneral(
   const hasStakingPattern = STAKING_PATTERNS.some((pattern) =>
     lowerQuestion.includes(pattern.replace(/%/g, ""))
   );
-  console.log("Has Staking Pattern:", hasStakingPattern);
 
   const baseQuery = `
     WITH ranked_matches AS (
@@ -205,7 +204,7 @@ async function fetchCodeEmbeddingsGeneral(
     : [questionEmbedding, teamName, `%${lowerQuestion}%`];
 
   const query = await pool.query(baseQuery, params);
-  console.log("Query:", query.rows);
+
   return query.rows;
 }
 
