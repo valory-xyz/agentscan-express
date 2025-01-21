@@ -82,6 +82,7 @@ interface RelevantContext {
   location: string;
   type: string;
   similarity?: number;
+  score?: number;
 }
 
 interface ChatResponse {
@@ -373,6 +374,7 @@ function filterAndSortContext(
       name: embedding.name,
       location: embedding.location || "",
       type: embedding.type || "component",
+      score: relevantEmbeddings.find(({ index }) => index === index)?.score || 0,
     }));
 
   return relevantContext

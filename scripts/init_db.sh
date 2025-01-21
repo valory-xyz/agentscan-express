@@ -116,18 +116,29 @@ if [ ! -f "$SCHEMA_FILE" ]; then
     exit 1
 fi
 
+# Create main database if it doesn't exist
+echo "Creating main database if it doesn't exist..."
+psql \
+    -h localhost \
+    -U $(whoami) \
+    -p $POSTGRES_PORT \
+    -d postgres \
+    -c "CREATE DATABASE $POSTGRES_DB;" 2>/dev/null || true
+
 # Drop test database if it exists
 psql \
     -h localhost \
     -U $(whoami) \
     -p $POSTGRES_PORT \
-    -c "DROP DATABASE IF EXISTS $TEST_DB;" 
+    -d postgres \
+    -c "DROP DATABASE IF EXISTS $TEST_DB;"
 
 # Create fresh test database
 psql \
     -h localhost \
     -U $(whoami) \
     -p $POSTGRES_PORT \
+    -d postgres \
     -c "CREATE DATABASE $TEST_DB;"
 
 # More explicit pgvector extension creation for main database
@@ -137,7 +148,12 @@ psql \
     -U $(whoami) \
     -d $POSTGRES_DB \
     -p $POSTGRES_PORT \
-    -c "DROP EXTENSION IF EXISTS vector;" \
+    -c "DROP EXTENSION IF EXISTS vector;" 2>/dev/null || true
+psql \
+    -h localhost \
+    -U $(whoami) \
+    -d $POSTGRES_DB \
+    -p $POSTGRES_PORT \
     -c "CREATE EXTENSION vector;"
 
 # More explicit pgvector extension creation for test database
