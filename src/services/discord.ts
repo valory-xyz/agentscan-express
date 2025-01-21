@@ -268,51 +268,69 @@ export async function registerCommands(client: any) {
 }
 
 export async function handleSlashCommand(interaction: any) {
-  if (!interaction.memberPermissions?.has("Administrator")) {
-    await interaction.reply({
-      content: "Only administrators can manage bot channels.",
-      ephemeral: true,
-    });
-    return;
-  }
+  try {
+    // Immediately defer the reply
+    await interaction.deferReply({ ephemeral: true });
 
-  const channelId = interaction.channelId;
-  const serverId = interaction.guildId;
-  const enabledBy = interaction.user.id;
-
-  switch (interaction.commandName) {
-    case "enable":
-      await pool.query(
-        `INSERT INTO discord_servers (id) 
-         VALUES ($1) 
-         ON CONFLICT (id) DO NOTHING`,
-        [serverId]
-      );
-
-      await pool.query(
-        `INSERT INTO discord_allowed_channels (channel_id, server_id, enabled_by) 
-         VALUES ($1, $2, $3) 
-         ON CONFLICT (channel_id) DO NOTHING`,
-        [channelId, serverId, enabledBy]
-      );
-
-      await interaction.reply({
-        content: "Bot enabled in this channel!",
+    if (!interaction.memberPermissions?.has("Administrator")) {
+      await interaction.editReply({
+        content: "Only administrators can manage bot channels.",
         ephemeral: true,
       });
-      break;
+      return;
+    }
 
-    case "disable":
-      await pool.query(
-        "DELETE FROM discord_allowed_channels WHERE channel_id = $1",
-        [channelId]
-      );
+    const channelId = interaction.channelId;
+    const serverId = interaction.guildId;
+    const enabledBy = interaction.user.id;
 
-      await interaction.reply({
-        content: "Bot disabled in this channel!",
-        ephemeral: true,
-      });
-      break;
+    switch (interaction.commandName) {
+      case "enable":
+        await pool.query(
+          `INSERT INTO discord_servers (id) 
+           VALUES ($1) 
+           ON CONFLICT (id) DO NOTHING`,
+          [serverId]
+        );
+
+        await pool.query(
+          `INSERT INTO discord_allowed_channels (channel_id, server_id, enabled_by) 
+           VALUES ($1, $2, $3) 
+           ON CONFLICT (channel_id) DO NOTHING`,
+          [channelId, serverId, enabledBy]
+        );
+
+        await interaction.editReply({
+          content: "Bot enabled in this channel!",
+          ephemeral: true,
+        });
+        break;
+
+      case "disable":
+        await pool.query(
+          "DELETE FROM discord_allowed_channels WHERE channel_id = $1",
+          [channelId]
+        );
+
+        await interaction.editReply({
+          content: "Bot disabled in this channel!",
+          ephemeral: true,
+        });
+        break;
+    }
+  } catch (error) {
+    console.error("Error in handleSlashCommand:", error);
+    try {
+      const errorMessage =
+        "Sorry, something went wrong while processing your command.";
+      if (interaction.deferred) {
+        await interaction.editReply({ content: errorMessage, ephemeral: true });
+      } else if (!interaction.replied) {
+        await interaction.reply({ content: errorMessage, ephemeral: true });
+      }
+    } catch (followUpError) {
+      console.error("Error sending error message:", followUpError);
+    }
   }
 }
 
