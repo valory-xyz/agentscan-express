@@ -13,7 +13,10 @@ export async function handleMessage(message: Message): Promise<void> {
   if (message.author.bot) return;
 
   const isBotMentioned = message.mentions.has(discordClient.user!.id);
-  if (!isBotMentioned) return;
+  if (!isBotMentioned) {
+    console.log("Bot not mentioned");
+    return;
+  }
 
   const isAllowedChannel =
     (await isChannelAllowed(message.channelId)) ||
@@ -160,10 +163,6 @@ async function streamResponse(
   teamData: any,
   thread?: ThreadChannel
 ): Promise<void> {
-  const userProperties = {
-    username: message.author.username,
-  };
-
   const targetChannel = thread || (message.channel as any);
   let fullResponse = "";
   let currentChunk = "";
@@ -177,8 +176,10 @@ async function streamResponse(
   }
 
   try {
+    const cleanContent = message.content.replace(/<@!\d+>|<@\d+>/g, "").trim();
+
     for await (const response of generateConversationResponse(
-      message.content,
+      cleanContent,
       conversationHistory,
       teamData,
       "general",
@@ -192,56 +193,23 @@ async function streamResponse(
         return;
       }
 
-      if (response.done) {
-        // Send any remaining content
-        if (currentChunk) {
+      fullResponse += response.content || "";
+      currentChunk += response.content || "";
+
+      // If current chunk exceeds Discord's limit or response is done
+      if (currentChunk.length >= 1900 || response.done) {
+        try {
           lastMessage = await targetChannel.send({
-            content: currentChunk,
+            content: currentChunk.slice(0, 1900),
             reply: lastMessage
               ? { messageReference: lastMessage.id }
               : undefined,
           });
+          currentChunk = currentChunk.slice(1900); // Keep remainder for next chunk
+        } catch (error) {
+          console.error("Error sending message:", error);
+          throw error;
         }
-
-        updateConversationHistory(conversationHistory, {
-          role: "assistant",
-          content: fullResponse,
-        });
-
-        amplitudeClient.track({
-          event_type: "conversation_completed",
-          user_id: message.author.id,
-          user_properties: userProperties,
-          event_properties: {
-            teamId: TEAM_ID,
-            question: message.content,
-            source: "discord",
-            answer: fullResponse,
-            channel_id: message.channelId,
-            channel_type: message.channel.type,
-            guild_id: message.guildId || "DM",
-          },
-        });
-
-        return;
-      }
-
-      fullResponse += response.content;
-      currentChunk += response.content;
-
-      // If current chunk exceeds 1900 characters (leaving some buffer), send it
-      if (currentChunk.length >= 1900) {
-        // Find the last space to break at
-        const lastSpace = currentChunk.lastIndexOf(" ", 1900);
-        const sendChunk = currentChunk.slice(0, lastSpace);
-
-        lastMessage = await targetChannel.send({
-          content: sendChunk,
-          reply: lastMessage ? { messageReference: lastMessage.id } : undefined,
-        });
-
-        // Keep the remainder for the next chunk
-        currentChunk = currentChunk.slice(lastSpace + 1);
       }
     }
   } catch (error) {

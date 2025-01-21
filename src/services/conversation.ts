@@ -155,6 +155,7 @@ export async function findRelevantContext(
     codeEmbeddings,
     decodedQuestion
   );
+
   return filterAndSortContext(codeEmbeddings, relevantEmbeddings);
 }
 
@@ -163,58 +164,49 @@ async function fetchCodeEmbeddingsGeneral(
   teamName: string,
   decodedQuestion: string
 ) {
-  const relevantPatterns = STAKING_PATTERNS.filter((pattern) =>
-    decodedQuestion.toLowerCase().includes(pattern.replace(/%/g, ""))
+  const lowerQuestion = decodedQuestion.toLowerCase();
+  const hasStakingPattern = STAKING_PATTERNS.some((pattern) =>
+    lowerQuestion.includes(pattern.replace(/%/g, ""))
   );
+  console.log("Has Staking Pattern:", hasStakingPattern);
 
-  if (relevantPatterns.length === 0) {
-    const query = await pool.query(
-      `WITH ranked_matches AS (
-        SELECT content, name, location,original_location,type, (embedding <=> $1) as similarity
-        FROM context_embeddings 
-        WHERE company_id = $2 AND (embedding <=> $1) < 0.8
-        ORDER BY similarity
-      )
-      SELECT *,
-        CASE 
-          WHEN LOWER(content) LIKE $3 THEN similarity * 0.7
-          WHEN LOWER(name) LIKE $3 THEN similarity * 0.8
-          ELSE similarity
-        END as adjusted_similarity
-      FROM ranked_matches
-      ORDER BY adjusted_similarity
-        `,
-      [questionEmbedding, teamName, `%${decodedQuestion.toLowerCase()}%`]
-    );
-    return query.rows.slice(0, 15);
-  }
-
-  const query = await pool.query(
-    `WITH ranked_matches AS (
-      SELECT content, name, location, type, (embedding <=> $1) as similarity
+  const baseQuery = `
+    WITH ranked_matches AS (
+      SELECT 
+        content, 
+        name, 
+        location,
+        original_location,
+        type, 
+        (embedding <=> $1) as similarity
       FROM context_embeddings 
-      WHERE company_id = $2 AND (embedding <=> $1) < 0.8
+      WHERE company_id = $2 
+      AND (embedding <=> $1) < 0.8
       ORDER BY similarity
     )
     SELECT *,
       CASE 
-        WHEN LOWER(content) LIKE '%pearl%' AND LOWER($3) LIKE ANY(SELECT UNNEST($4::text[])) THEN similarity * 0.3
+        ${
+          hasStakingPattern
+            ? "WHEN LOWER(content) LIKE '%pearl%' AND LOWER($3) LIKE ANY(SELECT UNNEST($4::text[])) THEN similarity * 0.3"
+            : ""
+        }
         WHEN LOWER(content) LIKE $3 THEN similarity * 0.7
         WHEN LOWER(name) LIKE $3 THEN similarity * 0.8
         ELSE similarity
       END as adjusted_similarity
     FROM ranked_matches
     ORDER BY adjusted_similarity
-    `,
-    [
-      questionEmbedding,
-      teamName,
-      `%${decodedQuestion.toLowerCase()}%`,
-      relevantPatterns,
-    ]
-  );
+    LIMIT 15
+  `;
 
-  return query.rows.slice(0, 15);
+  const params = hasStakingPattern
+    ? [questionEmbedding, teamName, `%${lowerQuestion}%`, STAKING_PATTERNS]
+    : [questionEmbedding, teamName, `%${lowerQuestion}%`];
+
+  const query = await pool.query(baseQuery, params);
+  console.log("Query:", query.rows);
+  return query.rows;
 }
 
 async function fetchCodeEmbeddingsAgent(
@@ -312,41 +304,63 @@ async function fetchCodeEmbeddingsBasic(
 }
 
 async function scoreEmbeddings(codeEmbeddings: any[], decodedQuestion: string) {
-  const filterPromises = codeEmbeddings.map((embedding, index) =>
-    withRetry(
+  const BATCH_SIZE = 5; // Process 5 embeddings at a time
+  const results: Array<{ score: number; index: number }> = [];
+
+  for (let i = 0; i < codeEmbeddings.length; i += BATCH_SIZE) {
+    const batch = codeEmbeddings.slice(i, i + BATCH_SIZE);
+
+    await withRetry(
       async () => {
+        const messages = [
+          {
+            role: "user" as const,
+            content: batch
+              .map(
+                (embedding, i) =>
+                  `Context ${i + 1}:\n${
+                    embedding.content
+                  }\n\nQuestion: "${decodedQuestion}"\nRate 0-10:`
+              )
+              .join("\n\n"),
+          },
+        ];
+
         const completion = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [
             {
-              role: "user",
-              content: `Given the following question: "${decodedQuestion}"
-Rate how relevant this context is for answering the question on a scale of 0-10 
-(0 being completely irrelevant, 10 being highly relevant).
-Respond with only a number.
-
-Context:
-${embedding.content}`,
+              role: "system" as const,
+              content:
+                "You will receive multiple contexts to rate. For each context, respond with a single number between 0-10 based on its relevance to the question. Separate each number with a comma. For example: 8,4,7,2,9",
             },
+            ...messages,
           ],
-          max_tokens: 10,
+          max_tokens: 50,
           temperature: 0.1,
         });
 
-        const score = parseInt(
-          completion.choices[0].message.content?.trim() || "0"
-        );
-        if (isNaN(score) || score < 0 || score > 10) {
-          throw new Error("Invalid score format");
+        const scores = completion.choices[0].message.content
+          ?.split(",")
+          .map((score) => parseInt(score.trim()))
+          .filter((score) => !isNaN(score) && score >= 0 && score <= 10);
+
+        if (!scores || scores.length !== batch.length) {
+          throw new Error("Invalid score format or count");
         }
 
-        return { score, index };
+        scores.forEach((score, batchIndex) => {
+          results.push({
+            score,
+            index: i + batchIndex,
+          });
+        });
       },
       { maxRetries: 3, initialDelay: 1000 }
-    )
-  );
+    );
+  }
 
-  return await Promise.all(filterPromises);
+  return results;
 }
 
 function filterAndSortContext(
@@ -374,7 +388,8 @@ function filterAndSortContext(
       name: embedding.name,
       location: embedding.location || "",
       type: embedding.type || "component",
-      score: relevantEmbeddings.find(({ index }) => index === index)?.score || 0,
+      score:
+        relevantEmbeddings.find(({ index }) => index === index)?.score || 0,
     }));
 
   return relevantContext
@@ -418,6 +433,7 @@ export async function* generateConversationResponse(
       }
     } catch (cacheError) {
       console.error("Cache error:", cacheError);
+      yield { content: "", error: "Cache error occurred" };
     }
 
     //get agent id
@@ -436,6 +452,7 @@ export async function* generateConversationResponse(
       agent?.agent?.id,
       transactions
     );
+
     const responseChunks: string[] = [];
 
     try {
@@ -471,7 +488,6 @@ export async function* generateConversationResponse(
         await redis.set(cacheKey, JSON.stringify(responseChunks), {
           EX: CACHE_TTL,
         });
-        console.log("Cached response for question:", decodedQuestion);
       } catch (cacheError) {
         console.error("Error caching response:", cacheError);
       }
