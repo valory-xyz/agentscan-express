@@ -91,6 +91,12 @@ interface ChatResponse {
   error?: string;
 }
 
+interface SurroundingMessage {
+  content: string;
+  author: string;
+  isReplyTo?: boolean;
+}
+
 export async function getTeamData(teamId: string): Promise<TeamData> {
   const teamCacheKey = `team:${teamId}`;
 
@@ -130,8 +136,31 @@ export async function findRelevantContext(
   teamName: string,
   promptType: PromptType,
   agentId?: string | null,
-  transactions?: any[]
+  transactions?: any[],
+  surroundingMessages?: SurroundingMessage[]
 ): Promise<RelevantContext[]> {
+  const deploymentId = process.env.RAILWAY_DEPLOYMENT_ID || "local";
+
+  // Create a context-aware cache key
+  const cacheKey = `relevantContext:${deploymentId}:${teamName}:${promptType}:${
+    agentId || "none"
+  }:${Buffer.from(
+    decodedQuestion +
+      (surroundingMessages?.map((m) => m.content).join("") || "")
+  ).toString("base64")}`;
+
+  // Cache check logic...
+  if (deploymentId !== "local") {
+    try {
+      const cachedContext = await redis.get(cacheKey);
+      if (cachedContext) {
+        return JSON.parse(cachedContext);
+      }
+    } catch (cacheError) {
+      console.error("Cache error in findRelevantContext:", cacheError);
+    }
+  }
+
   const questionEmbedding = await generateEmbeddingWithRetry(decodedQuestion);
 
   let codeEmbeddings;
@@ -151,12 +180,27 @@ export async function findRelevantContext(
     );
   }
 
+  // Modified to include surrounding messages in scoring
   const relevantEmbeddings = await scoreEmbeddings(
     codeEmbeddings,
-    decodedQuestion
+    decodedQuestion,
+    surroundingMessages
   );
 
-  return filterAndSortContext(codeEmbeddings, relevantEmbeddings);
+  const result = filterAndSortContext(codeEmbeddings, relevantEmbeddings);
+
+  // Cache the result...
+  if (deploymentId !== "local") {
+    try {
+      await redis.set(cacheKey, JSON.stringify(result), {
+        EX: 30 * 60,
+      });
+    } catch (cacheError) {
+      console.error("Error caching relevant context:", cacheError);
+    }
+  }
+
+  return result;
 }
 
 async function fetchCodeEmbeddingsGeneral(
@@ -302,9 +346,27 @@ async function fetchCodeEmbeddingsBasic(
   return query.rows.slice(0, 15);
 }
 
-async function scoreEmbeddings(codeEmbeddings: any[], decodedQuestion: string) {
-  const BATCH_SIZE = 5; // Process 5 embeddings at a time
+async function scoreEmbeddings(
+  codeEmbeddings: any[],
+  decodedQuestion: string,
+  surroundingMessages?: {
+    content: string;
+    author: string;
+    isReplyTo?: boolean;
+  }[]
+) {
+  const BATCH_SIZE = 5;
   const results: Array<{ score: number; index: number }> = [];
+
+  const conversationContext = surroundingMessages
+    ? "\n\nConversation Context:\n" +
+      surroundingMessages
+        .map(
+          (m) =>
+            `${m.author}: ${m.content}${m.isReplyTo ? " (replied to)" : ""}`
+        )
+        .join("\n")
+    : "";
 
   for (let i = 0; i < codeEmbeddings.length; i += BATCH_SIZE) {
     const batch = codeEmbeddings.slice(i, i + BATCH_SIZE);
@@ -319,7 +381,7 @@ async function scoreEmbeddings(codeEmbeddings: any[], decodedQuestion: string) {
                 (embedding, i) =>
                   `Context ${i + 1}:\n${
                     embedding.content
-                  }\n\nQuestion: "${decodedQuestion}"\nRate 0-10:`
+                  }\n\nQuestion: "${decodedQuestion}"${conversationContext}\nRate 0-10:`
               )
               .join("\n\n"),
           },
@@ -331,7 +393,7 @@ async function scoreEmbeddings(codeEmbeddings: any[], decodedQuestion: string) {
             {
               role: "system" as const,
               content:
-                "You will receive multiple contexts to rate. For each context, respond with a single number between 0-10 based on its relevance to the question. Separate each number with a comma. For example: 8,4,7,2,9",
+                "You are an Autonolas (Olas) support bot expert. Your task is to rate how relevant each context is for answering questions about Olas, considering the conversation context. Score each context from 0-10 based on these rules:\n\n1. STRICT ZERO (0) FOR:\n- Single word messages\n- Exclamations without questions\n- Random project names\n- Off-topic conversation\n- Non-questions without technical context\n\n2. HIGH SCORES (7-10) FOR:\n- Technical questions about Olas\n- Error messages from Olas tools/quickstart\n- Installation/setup problems\n- Development and deployment issues\n- Questions about architecture/protocols\n- Questions about team/project\n\n3. MEDIUM SCORES (3-6) FOR:\n- General blockchain questions related to Olas\n- Basic conceptual questions\n\nIMPORTANT:\n- Error messages and technical problems are highly relevant\n- Installation issues should get high scores\n- Consider if it's a genuine support request\n\nRESPOND ONLY WITH NUMBERS 0-10 SEPARATED BY COMMAS. Example:\n0,3,7,0,4",
             },
             ...messages,
           ],

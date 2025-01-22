@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 import {
   handleMessage,
   handleSlashCommand,
+  initializeMessageQueue,
   registerCommands,
 } from "../services/discord";
 
@@ -29,7 +30,9 @@ export const initializeDiscord = async (): Promise<void> => {
     await discordClient.login(process.env.DISCORD_BOT_TOKEN);
     console.log(`Discord bot initialized as ${discordClient.user?.tag}`);
 
-    discordClient.once(Events.ClientReady, async (readyClient) => {
+    initializeMessageQueue();
+
+    discordClient.on(Events.ClientReady, async (readyClient) => {
       console.log(`Ready! Logged in as ${readyClient.user.tag}`);
       await registerCommands(discordClient);
     });
