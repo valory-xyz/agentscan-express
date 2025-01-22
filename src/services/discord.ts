@@ -92,12 +92,13 @@ async function streamResponse(
   message: Message,
   conversationHistory: any[],
   teamData: any,
-  thread?: ThreadChannel
+  thread?: ThreadChannel,
+  responseGenerator?: AsyncGenerator<any>
 ): Promise<void> {
   const targetChannel = thread || (message.channel as any);
   let fullResponse = "";
   let currentChunk = "";
-  let lastMessage: Message | null = message; // Initialize with original message
+  let lastMessage: Message | null = null; // Start without a reference
 
   if (thread && "sendTyping" in message.channel) {
     await message.channel.sendTyping();
@@ -109,19 +110,11 @@ async function streamResponse(
   try {
     const cleanContent = message.content.replace(/<@!\d+>|<@\d+>/g, "").trim();
 
-    for await (const response of generateConversationResponse(
-      cleanContent,
-      conversationHistory,
-      teamData,
-      "general",
-      null,
-      false
-    )) {
+    for await (const response of responseGenerator!) {
       if (response.error) {
+        console.error("Response error:", response.error);
         await targetChannel.send({
-          content:
-            "Sorry, I encountered an error while processing your request.",
-          reply: { messageReference: lastMessage?.id },
+          content: `Error: ${response.error}`,
         });
         return;
       }
@@ -129,7 +122,7 @@ async function streamResponse(
       fullResponse += response.content || "";
       currentChunk += response.content || "";
 
-      if (currentChunk.length >= 1600 || response.done) {
+      if (currentChunk.length >= 1500 || response.done) {
         let splitIndex = currentChunk.length;
         const breakPoints = [
           currentChunk.lastIndexOf(". "),
@@ -145,29 +138,58 @@ async function streamResponse(
         }
 
         try {
-          lastMessage = await targetChannel.send({
-            content: currentChunk.slice(0, splitIndex).trim(),
-            reply: { messageReference: lastMessage?.id },
-          });
+          // Send first message without reply
+          if (!lastMessage) {
+            lastMessage = await targetChannel.send({
+              content: currentChunk.slice(0, splitIndex).trim(),
+            });
+          } else {
+            // Subsequent messages reply to the last one
+            lastMessage = await targetChannel.send({
+              content: currentChunk.slice(0, splitIndex).trim(),
+              reply: {
+                messageReference: lastMessage.id,
+                failIfNotExists: false,
+              },
+            });
+          }
           currentChunk = currentChunk.slice(splitIndex);
         } catch (error) {
-          console.error("Error sending message:", error);
-          throw error;
+          console.error("Message send error:", error);
+          // Fallback: send without reply
+          lastMessage = await targetChannel.send({
+            content: currentChunk.slice(0, splitIndex).trim(),
+          });
+          currentChunk = currentChunk.slice(splitIndex);
         }
       }
     }
 
     if (currentChunk.trim().length > 0) {
-      await targetChannel.send({
-        content: currentChunk.trim(),
-        reply: { messageReference: lastMessage?.id },
-      });
+      try {
+        if (lastMessage) {
+          await targetChannel.send({
+            content: currentChunk.trim(),
+            reply: { messageReference: lastMessage.id, failIfNotExists: false },
+          });
+        } else {
+          await targetChannel.send({
+            content: currentChunk.trim(),
+          });
+        }
+      } catch (error) {
+        console.error("Final chunk send error:", error);
+        await targetChannel.send({
+          content: currentChunk.trim(),
+        });
+      }
     }
-  } catch (error) {
-    console.error("Error in streamResponse:", error);
+  } catch (error: any) {
+    console.error("StreamResponse error:", error);
     await targetChannel.send({
-      content: "Sorry, something went wrong while processing your message.",
-      reply: { messageReference: message.id },
+      content:
+        error?.message ||
+        "An unexpected error occurred while processing your message.",
     });
   }
 }
@@ -417,48 +439,96 @@ async function processMessage(
   }
 
   try {
-    const teamData = await getTeamData(TEAM_ID);
-    let thread: ThreadChannel | undefined;
-
-    // Create or get thread if in a text channel
-    if (message.channel instanceof TextChannel) {
-      thread = await message.startThread({
-        name: message.content.slice(0, 100), // Discord has a 100-char limit for thread names
-        autoArchiveDuration: 60,
-      });
+    // Start typing indicator immediately
+    if ("sendTyping" in message.channel) {
+      await message.channel.sendTyping();
     }
 
-    const conversationId = thread?.id || message.channelId;
+    const teamData = await getTeamData(TEAM_ID);
+    const conversationId = message.channelId;
     const conversationHistory = getOrCreateConversation(conversationId);
 
-    if (thread) {
-      await loadThreadHistory(thread, conversationHistory);
-    }
-
-    // Track the user message in conversation history
     updateConversationHistory(conversationHistory, {
       role: "user",
       content: message.content,
     });
 
-    amplitudeClient.track({
-      event_type: "conversation_made",
-      user_id: message.author.id,
-      user_properties: {
-        username: message.author.username,
-      },
-      event_properties: {
-        teamId: TEAM_ID,
-        question: message.content,
-        source: "discord",
-        messages: conversationHistory,
-        channel_id: message.channelId,
-        channel_type: message.channel.type,
-        guild_id: message.guildId || "DM",
-      },
-    });
+    // Keep typing indicator active during processing
+    const typingInterval = setInterval(() => {
+      if ("sendTyping" in message.channel) {
+        message.channel.sendTyping().catch(console.error);
+      }
+    }, 5000);
 
-    await streamResponse(message, conversationHistory, teamData, thread);
+    try {
+      // Generate response first
+      let responseStream = generateConversationResponse(
+        message.content,
+        conversationHistory,
+        teamData,
+        "general",
+        null,
+        false
+      );
+
+      // Check if we have a valid response
+      const firstChunk = await responseStream.next();
+      if (firstChunk.value?.error) {
+        clearInterval(typingInterval);
+        console.error("Error generating response:", firstChunk.value.error);
+        await message.reply(
+          "Sorry, something went wrong while processing your message."
+        );
+        return;
+      }
+
+      let thread: ThreadChannel | undefined;
+      if (message.channel instanceof TextChannel) {
+        thread = await message.startThread({
+          name: message.content.slice(0, 100),
+          autoArchiveDuration: 60,
+        });
+      }
+
+      if (thread) {
+        await loadThreadHistory(thread, conversationHistory);
+      }
+
+      amplitudeClient.track({
+        event_type: "conversation_made",
+        user_id: message.author.id,
+        user_properties: {
+          username: message.author.username,
+        },
+        event_properties: {
+          teamId: TEAM_ID,
+          question: message.content,
+          source: "discord",
+          messages: conversationHistory,
+          channel_id: message.channelId,
+          channel_type: message.channel.type,
+          guild_id: message.guildId || "DM",
+        },
+      });
+
+      const fullResponse = (async function* () {
+        yield firstChunk.value;
+        for await (const chunk of responseStream) {
+          yield chunk;
+        }
+      })();
+
+      await streamResponse(
+        message,
+        conversationHistory,
+        teamData,
+        thread,
+        fullResponse
+      );
+    } finally {
+      // Always clear the typing interval
+      clearInterval(typingInterval);
+    }
   } catch (error) {
     console.error("Error handling message:", error);
     await message.reply(
