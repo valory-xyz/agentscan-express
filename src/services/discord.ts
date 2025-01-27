@@ -19,7 +19,7 @@ const TEAM_ID = "56917ba2-9084-40c3-b9cf-67cd30cc389a";
 
 const conversations = new Map<string, any[]>();
 const MESSAGE_QUEUE: Message[] = [];
-const QUEUE_PROCESS_INTERVAL = "*/2 * * * * *"; // Runs every 2 minutes
+const QUEUE_PROCESS_INTERVAL = "*/2 * * * *"; // Runs every 2 minutes
 
 interface SurroundingMessage {
   content: string;
