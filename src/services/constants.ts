@@ -54,4 +54,7 @@ export const BLACKLIST_KEYWORDS = [
   "price prediction",
   "mc",
   "mcap",
+  "chicken genius",
+  "chickengenius",
+  "the chicken",
 ];
