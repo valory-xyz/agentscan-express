@@ -82,6 +82,11 @@ export async function handleMessage(message: Message): Promise<void> {
     return;
   }
 
+  if (isBlacklisted) {
+    console.log("Blacklisted message", message.content);
+    return;
+  }
+
   console.log("Message added to queue:", message.content);
   MESSAGE_QUEUE.push(message);
 }
