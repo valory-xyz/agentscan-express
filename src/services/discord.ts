@@ -87,6 +87,12 @@ export async function handleMessage(message: Message): Promise<void> {
     return;
   }
 
+  //if the message is in a thread, don't process it
+  if (message.channel instanceof ThreadChannel) {
+    console.log("Message in thread, not processing", message.content);
+    return;
+  }
+
   console.log("Message added to queue:", message.content);
   MESSAGE_QUEUE.push(message);
 }
