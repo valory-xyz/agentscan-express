@@ -9,17 +9,17 @@ import { checkRateLimit } from "../utils/messageLimiter";
 import { pool } from "../initalizers/postgres";
 import { amplitudeClient } from "../initalizers/amplitude";
 import { scheduleJob } from "node-schedule";
+import {
+  BLACKLIST_KEYWORDS,
+  DISCLAIMER_NOTE,
+  OLAS_KEYWORDS,
+} from "./constants";
 
 const TEAM_ID = "56917ba2-9084-40c3-b9cf-67cd30cc389a";
 
 const conversations = new Map<string, any[]>();
 const MESSAGE_QUEUE: Message[] = [];
-const RELEVANCY_THRESHOLD = 5;
-const QUEUE_PROCESS_INTERVAL = '*/2.5 * * * *'; // Runs every 2.5 minutes
-
-const DISCLAIMER_NOTE = ""; // Add empty string for now since we don't know the actual content
-const BLACKLIST_KEYWORDS: string[] = []; // Add empty array since we don't know the actual keywords
-const OLAS_KEYWORDS: string[] = []; // Add empty array since we don't know the actual keywords
+const QUEUE_PROCESS_INTERVAL = "*/10 * * * * *"; // Runs every 10 seconds
 
 interface SurroundingMessage {
   content: string;
@@ -27,50 +27,18 @@ interface SurroundingMessage {
   isReplyTo: boolean;
 }
 
-async function isConversationBetweenUsers(message: Message): Promise<boolean> {
-  try {
-    if (message.reference?.messageId) {
-      const repliedMessage = await message.channel.messages.fetch(message.reference.messageId);
-      if (!repliedMessage.author.bot) {
-        return true;
-      }
-    }
-
-    const recentMessages = await message.channel.messages.fetch({ limit: 4, before: message.id });
-    const orderedMessages = Array.from(recentMessages.values());
-
-    let userIds = new Set<string>();
-    let consecutiveUserMessages = 0;
-
-    userIds.add(message.author.id);
-
-    for (const msg of orderedMessages) {
-      if (msg.author.bot) continue;
-      
-      userIds.add(msg.author.id);
-      
-      if (msg.author.id === message.author.id) {
-        consecutiveUserMessages++;
-      }
-      
-      if (userIds.size >= 2 && orderedMessages.filter(m => !m.author.bot).length >= 2) {
-        return true;
-      }
-    }
-
-    return false;
-  } catch (error) {
-    console.error("Error checking conversation pattern:", error);
-    return false;
-  }
-}
-
 async function isMessageOlasRelated(content: string): Promise<boolean> {
   const normalizedContent = content.toLowerCase();
-  
+
   // Check if message contains any Olas-specific keywords
-  const hasOlasKeywords = OLAS_KEYWORDS.some(keyword => normalizedContent.includes(keyword.toLowerCase()));
-  
+  const hasOlasKeywords = OLAS_KEYWORDS.some((keyword) =>
+    normalizedContent.includes(keyword.toLowerCase())
+  );
+
+  if (hasOlasKeywords) {
+    return true;
+  }
+
   // For messages without clear indicators, default to false
   return false;
 }
@@ -78,8 +46,10 @@ async function isMessageOlasRelated(content: string): Promise<boolean> {
 export async function handleMessage(message: Message): Promise<void> {
   if (message.author.bot) return;
 
-  // Only proceed if message is in a thread or in a text channel where we can create a thread
-  if (!(message.channel instanceof ThreadChannel) && !(message.channel instanceof TextChannel)) {
+  if (
+    !(message.channel instanceof ThreadChannel) &&
+    !(message.channel instanceof TextChannel)
+  ) {
     return;
   }
 
@@ -93,8 +63,7 @@ export async function handleMessage(message: Message): Promise<void> {
   if (!isAllowedChannel) {
     return;
   }
-
-  // Add message to queue for batch processing
+  console.log("Message added to queue:", message.content);
   MESSAGE_QUEUE.push(message);
 }
 
@@ -161,7 +130,6 @@ async function streamResponse(
   }
 
   try {
-    const cleanContent = message.content.replace(/<@!\d+>|<@\d+>/g, "").trim();
     let isLastChunk = false;
     let accumulatedContent = "";
 
@@ -180,23 +148,28 @@ async function streamResponse(
         if (accumulatedContent.length > 1800) {
           const breakPoints = [
             ...accumulatedContent.matchAll(/[.!?]\s+(?=[A-Z])/g), // Sentence endings
-            ...accumulatedContent.matchAll(/\n(?=[#\-\d])/g),     // New lines before sections
-            ...accumulatedContent.matchAll(/:\s*\n/g),            // Lines ending with colon
-            ...accumulatedContent.matchAll(/[.!?]\s+/g),          // Any sentence ending
-            ...accumulatedContent.matchAll(/,\s+/g),              // Comma breaks as last resort
-          ].map(match => match.index).filter(index => index !== undefined && index < 1800);
+            ...accumulatedContent.matchAll(/\n(?=[#\-\d])/g), // New lines before sections
+            ...accumulatedContent.matchAll(/:\s*\n/g), // Lines ending with colon
+            ...accumulatedContent.matchAll(/[.!?]\s+/g), // Any sentence ending
+            ...accumulatedContent.matchAll(/,\s+/g), // Comma breaks as last resort
+          ]
+            .map((match) => match.index)
+            .filter((index) => index !== undefined && index < 1800);
 
           if (breakPoints.length > 0) {
-            splitIndex = Math.max(...breakPoints as number[]) + 1;
+            splitIndex = Math.max(...(breakPoints as number[])) + 1;
           } else {
             // If no good breaking point, use word boundary
-            splitIndex = accumulatedContent.lastIndexOf(' ', 1800);
+            splitIndex = accumulatedContent.lastIndexOf(" ", 1800);
             if (splitIndex === -1) splitIndex = 1800;
           }
         }
 
-        const contentToSend = accumulatedContent.slice(0, splitIndex).trim() + 
-                            (isLastChunk && splitIndex === accumulatedContent.length ? DISCLAIMER_NOTE : "");
+        const contentToSend =
+          accumulatedContent.slice(0, splitIndex).trim() +
+          (isLastChunk && splitIndex === accumulatedContent.length
+            ? DISCLAIMER_NOTE
+            : "");
 
         try {
           if (!lastMessage) {
@@ -204,7 +177,10 @@ async function streamResponse(
           } else {
             lastMessage = await targetChannel.send({
               content: contentToSend,
-              reply: { messageReference: lastMessage.id, failIfNotExists: false }
+              reply: {
+                messageReference: lastMessage.id,
+                failIfNotExists: false,
+              },
             });
           }
 
@@ -224,7 +200,7 @@ async function streamResponse(
         if (lastMessage) {
           await targetChannel.send({
             content: finalContent,
-            reply: { messageReference: lastMessage.id, failIfNotExists: false }
+            reply: { messageReference: lastMessage.id, failIfNotExists: false },
           });
         } else {
           await targetChannel.send({ content: finalContent });
@@ -331,40 +307,43 @@ async function isChannelAllowed(channelId: string): Promise<boolean> {
 }
 
 async function processQueuedMessages() {
-  if (MESSAGE_QUEUE.length === 0) return;
+  if (MESSAGE_QUEUE.length === 0) {
+    console.log("No messages to process");
+    return;
+  }
+
+  console.log("Processing messages...");
 
   const messages = [...MESSAGE_QUEUE];
   MESSAGE_QUEUE.length = 0;
 
   const teamData = await getTeamData(TEAM_ID);
+  console.log("Team data fetched", teamData);
   const BATCH_SIZE = 10;
 
   for (let i = 0; i < messages.length; i += BATCH_SIZE) {
+    console.log("Processing batch", i);
     const batch = messages.slice(i, i + BATCH_SIZE);
-
+    console.log("Batch size", batch.length);
     try {
       const messagesToProcess = await Promise.all(
         batch.map(async (message) => {
           try {
-            if (await isConversationBetweenUsers(message)) {
-              return null;
-            }
-
-            const isBotMentioned = message.mentions.has(discordClient.user!.id);
             let messageContent = message.content.toLowerCase();
 
             const previousMessage = await getPreviousMessage(message);
-            const contentToCheck = previousMessage ? 
-              previousMessage.content.toLowerCase() : 
-              messageContent;
+            const contentToCheck = previousMessage
+              ? previousMessage.content.toLowerCase()
+              : messageContent;
 
-            if (BLACKLIST_KEYWORDS.some(keyword => contentToCheck.includes(keyword))) {
-              return null;
-            }
+            console.log("Content to check", contentToCheck);
 
-            const isOlasRelated = await isMessageOlasRelated(contentToCheck);
-            
-            if (!isOlasRelated && !isBotMentioned) {
+            if (
+              BLACKLIST_KEYWORDS.some((keyword) =>
+                contentToCheck.includes(keyword)
+              )
+            ) {
+              console.log("Blacklisted keyword detected");
               return null;
             }
 
@@ -412,6 +391,16 @@ async function processQueuedMessages() {
               ];
             }
 
+            const isOlasRelated = await isMessageOlasRelated(contentToCheck);
+
+            if (isOlasRelated) {
+              console.log("Olas related");
+              return {
+                message,
+                relevancyScore: 10,
+              };
+            }
+
             const relevantContext = await findRelevantContext(
               messageContent,
               teamData.name,
@@ -431,7 +420,9 @@ async function processQueuedMessages() {
         })
       );
 
-      const validMessages = messagesToProcess.filter(result => result !== null);
+      const validMessages = messagesToProcess.filter(
+        (result) => result !== null
+      );
 
       for (const messageData of validMessages) {
         if (messageData) {
@@ -514,24 +505,24 @@ async function processMessage(
         console.error("Response generation failed with error:", {
           error: firstChunk.value.error,
           message: message.content,
-          author: message.author.username
+          author: message.author.username,
         });
         return;
       }
 
       let thread: ThreadChannel | undefined;
-      
+
       if (message.hasThread && message.thread) {
         thread = message.thread as ThreadChannel;
       } else if (message.channel instanceof TextChannel) {
         try {
           const cleanTitle = message.content
-            .replace(/<@!?\d+>/g, '')
-            .replace(/<@&\d+>/g, '')
-            .replace(/<#\d+>/g, '')
-            .replace(/\s*<@&?\d+>\s*/g, ' ')
-            .replace(/\s*<[#@][!&]?\d+>\s*/g, ' ')
-            .replace(/\s*\d{17,19}\s*/g, ' ')
+            .replace(/<@!?\d+>/g, "")
+            .replace(/<@&\d+>/g, "")
+            .replace(/<#\d+>/g, "")
+            .replace(/\s*<@&?\d+>\s*/g, " ")
+            .replace(/\s*<[#@][!&]?\d+>\s*/g, " ")
+            .replace(/\s*\d{17,19}\s*/g, " ")
             .trim()
             .slice(0, 50);
 
@@ -541,13 +532,14 @@ async function processMessage(
             autoArchiveDuration: 60,
           });
         } catch (error: any) {
-          if (error.code === 'MessageExistingThread' && message.thread) {
+          if (error.code === "MessageExistingThread" && message.thread) {
             thread = message.thread as ThreadChannel;
           } else {
             throw error;
           }
         }
       }
+      console.log("Thread created", thread);
 
       if (thread) {
         await loadThreadHistory(thread, conversationHistory);
@@ -560,7 +552,7 @@ async function processMessage(
         }
       })();
 
-      const targetChannel = thread || message.channel;
+      console.log("Streaming response...", fullResponse);
       await streamResponse(
         message,
         conversationHistory,
@@ -574,7 +566,7 @@ async function processMessage(
         error,
         message: message.content,
         author: message.author.username,
-        channelId: message.channelId
+        channelId: message.channelId,
       });
       throw error;
     } finally {
@@ -585,7 +577,7 @@ async function processMessage(
       error,
       message: message.content,
       author: message.author.username,
-      channelId: message.channelId
+      channelId: message.channelId,
     });
     return;
   }
