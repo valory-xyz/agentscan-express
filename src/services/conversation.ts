@@ -144,10 +144,7 @@ export async function findRelevantContext(
   // Create a context-aware cache key
   const cacheKey = `relevantContext:${deploymentId}:${teamName}:${promptType}:${
     agentId || "none"
-  }:${Buffer.from(
-    decodedQuestion +
-      (surroundingMessages?.map((m) => m.content).join("") || "")
-  ).toString("base64")}`;
+  }:${Buffer.from(decodedQuestion).toString("base64")}`;
 
   // Cache check logic...
   if (deploymentId !== "local") {
