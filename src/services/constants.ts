@@ -52,4 +52,6 @@ export const BLACKLIST_KEYWORDS = [
   "current price",
   "token price",
   "price prediction",
+  "mc",
+  "mcap",
 ];

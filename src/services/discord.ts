@@ -17,9 +17,10 @@ import {
 
 const TEAM_ID = "56917ba2-9084-40c3-b9cf-67cd30cc389a";
 
+const RELEVANCY_THRESHOLD = 5;
 const conversations = new Map<string, any[]>();
 const MESSAGE_QUEUE: Message[] = [];
-const QUEUE_PROCESS_INTERVAL = "*/2 * * * *"; // Runs every 2 minutes
+const QUEUE_PROCESS_INTERVAL = "*/1 * * * *"; // Runs every 2 minutes
 
 interface SurroundingMessage {
   content: string;
@@ -63,6 +64,24 @@ export async function handleMessage(message: Message): Promise<void> {
   if (!isAllowedChannel) {
     return;
   }
+
+  //if the message is one word, don't process it
+  if (message.content.split(" ").length <= 1) {
+    console.log("Message is one word, not processing");
+    return;
+  }
+
+  const isBotMentioned = message.mentions.has(discordClient.user!.id);
+  const isBlacklisted = BLACKLIST_KEYWORDS.some((keyword) =>
+    message.content.includes(keyword)
+  );
+
+  if (isBotMentioned) {
+    //process message
+    await processMessage(message, true, isBlacklisted);
+    return;
+  }
+
   console.log("Message added to queue:", message.content);
   MESSAGE_QUEUE.push(message);
 }
@@ -338,15 +357,6 @@ async function processQueuedMessages() {
 
             console.log("Content to check", contentToCheck);
 
-            if (
-              BLACKLIST_KEYWORDS.some((keyword) =>
-                contentToCheck.includes(keyword)
-              )
-            ) {
-              console.log("Blacklisted keyword detected");
-              return null;
-            }
-
             const channel = message.channel;
             let surroundingMessages: SurroundingMessage[] = [];
             let replyMessage: any = null;
@@ -412,6 +422,13 @@ async function processQueuedMessages() {
 
             const highestScore = relevantContext[0]?.score || 0;
 
+            if (!relevantContext || highestScore <= RELEVANCY_THRESHOLD) {
+              console.log("Not relevant", message.content, highestScore);
+              return null;
+            }
+
+            console.log("Relevant", message.content, highestScore);
+
             return { message, relevancyScore: highestScore };
           } catch (error) {
             console.error("Error processing message in batch:", error);
@@ -455,7 +472,8 @@ export function initializeMessageQueue() {
 
 async function processMessage(
   message: Message,
-  useRateLimit: boolean = true
+  useRateLimit: boolean = true,
+  isBlacklisted: boolean = false
 ): Promise<void> {
   try {
     const { limited, ttl } = await checkRateLimit(message.author.id, true);
@@ -486,7 +504,15 @@ async function processMessage(
       if ("sendTyping" in message.channel) {
         message.channel.sendTyping().catch(console.error);
       }
-    }, 5000);
+    }, 4250);
+
+    if (isBlacklisted) {
+      await message.reply(
+        "I apologize, but I cannot provide assistance with that type of request."
+      );
+      clearInterval(typingInterval);
+      return;
+    }
 
     try {
       let responseStream = generateConversationResponse(
@@ -526,9 +552,8 @@ async function processMessage(
             .trim()
             .slice(0, 50);
 
-          const userMention = `@${message.author.username}`;
           thread = await message.startThread({
-            name: `${userMention} ${cleanTitle}`,
+            name: `${cleanTitle}`,
             autoArchiveDuration: 60,
           });
         } catch (error: any) {
