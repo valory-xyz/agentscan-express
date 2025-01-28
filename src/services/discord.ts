@@ -150,7 +150,7 @@ async function streamResponse(
   responseGenerator?: AsyncGenerator<any>
 ): Promise<void> {
   const targetChannel = thread || (message.channel as any);
-  let lastMessage: Message | null = null;
+  let lastMessage: Message | null = message;
 
   if (thread && "sendTyping" in message.channel) {
     await message.channel.sendTyping();
