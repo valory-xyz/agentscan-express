@@ -5,7 +5,12 @@ const router = express.Router();
 
 router.post("/", async (req, res) => {
   try {
-    const { urls: rawUrls, maxDepth = 7, organization_id } = req.body;
+    const {
+      urls: rawUrls,
+      maxDepth = 7,
+      organization_id,
+      type = null,
+    } = req.body;
 
     if (!rawUrls || !organization_id) {
       return res
@@ -23,9 +28,9 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ error: "No valid URLs provided" });
     }
 
-    // Start crawling each URL in the background
+    // Start crawling each URL in the background with the optional type
     urls.forEach((url: string) => {
-      crawl_website(url, maxDepth, organization_id).catch((error) => {
+      crawl_website(url, maxDepth, organization_id, type).catch((error) => {
         console.error(`Crawling failed for ${url}:`, error);
       });
     });
