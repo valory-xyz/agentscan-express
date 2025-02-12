@@ -1225,6 +1225,7 @@ export async function crawl_website(
   base_url: string,
   max_depth: number = 7,
   organization_id: string,
+  contextType: string | null = null,
   currentDepth: number = 0
 ) {
   try {
@@ -1235,14 +1236,25 @@ export async function crawl_website(
         console.log(`Processing single X post: ${base_url}`);
         const { content } = await XPost(base_url);
         if (content) {
-          await processDocument(base_url, content, organization_id);
+          await processDocument(
+            base_url,
+            content,
+            organization_id,
+            undefined,
+            contextType
+          );
         }
       } else {
         // This is a user profile URL
         const username = base_url.split("/").pop()?.replace("@", "");
         if (username) {
           console.log(`Processing X account: ${username}`);
-          await processXAccount(username, organization_id);
+          await processXAccount(
+            username,
+            organization_id,
+            undefined,
+            contextType
+          );
         }
       }
       // Return empty array to prevent further crawling
@@ -1350,7 +1362,8 @@ export async function crawl_website(
             base_url,
             filtered_content,
             organization_id,
-            title
+            title,
+            contextType
           );
           console.log(
             `Document processing ${
@@ -1436,6 +1449,7 @@ export async function crawl_website(
                           normalizedLink,
                           max_depth,
                           organization_id,
+                          contextType,
                           currentDepth + 1
                         );
                       },
@@ -1532,7 +1546,8 @@ async function processDocument(
   url: string,
   cleanedCodeContent: string,
   organization_id: string,
-  title?: string
+  title?: string,
+  contextType?: string | null
 ): Promise<boolean> {
   try {
     const normalizedUrl = normalizeUrl(url);
@@ -1542,15 +1557,16 @@ async function processDocument(
       .update(normalizedUrl)
       .digest("hex");
 
-    // Determine the type based on the URL
+    // Determine the type based on the URL or use provided contextType
     const type =
-      url.includes("youtube.com") || url.includes("youtu.be")
+      contextType ||
+      (url.includes("youtube.com") || url.includes("youtu.be")
         ? "video"
         : url.includes("github.com")
         ? "code"
         : url.includes("x.com") || url.includes("twitter.com")
         ? "x"
-        : "document";
+        : "document");
 
     // For YouTube videos, format content with title prefix
     const cleaned_content =
@@ -2004,7 +2020,8 @@ async function XAccount(
 export async function processXAccount(
   username: string,
   organization_id: string,
-  maxPosts: number = 1000
+  maxPosts: number = 1000,
+  contextType: string | null = null
 ): Promise<boolean> {
   try {
     console.log(`Processing X account: ${username}`);
@@ -2051,7 +2068,13 @@ export async function processXAccount(
           const { content } = await XPost(post.url);
 
           if (content) {
-            await processDocument(post.url, content, organization_id);
+            await processDocument(
+              post.url,
+              content,
+              organization_id,
+              post.title,
+              contextType
+            );
             await updateProcessingStatus(
               urlId,
               post.url,
