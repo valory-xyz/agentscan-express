@@ -25,6 +25,9 @@ enum ProcessingStatus {
   FAILED = "failed",
 }
 
+// Add type definition near the top with other enums/types
+type ContextType = "video" | "document" | "code";
+
 // Modify the dbQueue to have lower concurrency
 export const dbQueue = new PQueue({
   concurrency: 2, // Reduced further for Railway
@@ -38,6 +41,30 @@ export const dbQueue = new PQueue({
 interface RetryOptions {
   maxRetries?: number;
   initialDelay?: number;
+}
+
+// Add a reusable retry utility
+export async function withRetry<T>(
+  operation: () => Promise<T>,
+  options: RetryOptions = {}
+): Promise<T> {
+  const { maxRetries = 3, initialDelay = 400 } = options;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (attempt === maxRetries) {
+        console.error(`Failed all retry attempts:`, error);
+        throw error;
+      }
+      const delay =
+        initialDelay * Math.pow(2, attempt - 1) + Math.random() * 200;
+      console.log(`Attempt ${attempt} failed. Retrying in ${delay}ms...`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  throw new Error("Failed after all retries");
 }
 
 // Add a crawling queue to limit concurrent page scraping
@@ -67,30 +94,6 @@ const X_TIMEOUTS = {
   NORMAL: 30000, // 30 seconds for scraping X post
   PROCESS: 45000, // 45 seconds for processing content
 };
-
-// Add a reusable retry utility
-export async function withRetry<T>(
-  operation: () => Promise<T>,
-  options: RetryOptions = {}
-): Promise<T> {
-  const { maxRetries = 3, initialDelay = 400 } = options;
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      return await operation();
-    } catch (error) {
-      if (attempt === maxRetries) {
-        console.error(`Failed all retry attempts:`, error);
-        throw error;
-      }
-      const delay =
-        initialDelay * Math.pow(2, attempt - 1) + Math.random() * 200;
-      console.log(`Attempt ${attempt} failed. Retrying in ${delay}ms...`);
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    }
-  }
-  throw new Error("Failed after all retries");
-}
 
 // Cache for embeddings
 const embeddingCache = new Map<string, number[]>();
@@ -516,13 +519,12 @@ async function transcribeYoutubeVideo(
   url: string,
   organization_id: string
 ): Promise<{ transcript: string; title: string | null }> {
+  const urlId = crypto.createHash("sha256").update(url).digest("hex");
   try {
     const { videoId, title } = await getYoutubeVideoInfo(url);
     if (!videoId) {
       throw new Error("Invalid YouTube URL");
     }
-
-    const urlId = crypto.createHash("sha256").update(url).digest("hex");
 
     // Check if video was already processed
     const status = await dbQueue.add(async () => {
@@ -589,7 +591,6 @@ async function transcribeYoutubeVideo(
     console.error("Error transcribing YouTube video:", error);
 
     // Update status to failed
-    const urlId = crypto.createHash("sha256").update(url).digest("hex");
     await updateProcessingStatus(
       urlId,
       url,
@@ -1009,18 +1010,19 @@ async function handleGitHubRateLimit(error: any): Promise<void> {
 // Update GitHub repository processing function
 async function processGithubRepo(
   repoUrl: string,
-  organization_id: string
+  organization_id: string,
+  contextType: ContextType | null = null
 ): Promise<boolean> {
-  try {
-    const urlId = crypto.createHash("sha256").update(repoUrl).digest("hex");
+  const urlId = crypto.createHash("sha256").update(repoUrl).digest("hex");
 
+  try {
     // Check if repository was already processed
     const status = await dbQueue.add(async () => {
       const result = await executeQuery(async (client) => {
         const res = await client.query(
           `SELECT status FROM context_processing_status 
            WHERE id = $1 AND type = $2 AND company_id = $3`,
-          [urlId, "code", organization_id]
+          [urlId, contextType || "code", organization_id]
         );
         return res.rows[0]?.status;
       });
@@ -1041,7 +1043,7 @@ async function processGithubRepo(
       ProcessingStatus.PROCESSING,
       organization_id,
       undefined,
-      "code"
+      contextType || "code"
     );
 
     // Extract owner and repo from GitHub URL
@@ -1121,7 +1123,9 @@ async function processGithubRepo(
               return await processDocument(
                 fileUrl,
                 filteredContent || pdfText,
-                organization_id
+                organization_id,
+                undefined,
+                contextType
               );
             } catch (pdfError) {
               console.error(
@@ -1134,7 +1138,13 @@ async function processGithubRepo(
 
           // Process non-PDF files
           const content = base64.decode(data.content);
-          return await processDocument(fileUrl, content, organization_id);
+          return await processDocument(
+            fileUrl,
+            content,
+            organization_id,
+            undefined,
+            contextType
+          );
         } catch (error: any) {
           if (error.status === 403) {
             await handleGitHubRateLimit(error);
@@ -1198,7 +1208,7 @@ async function processGithubRepo(
       ProcessingStatus.COMPLETED,
       organization_id,
       undefined,
-      "code"
+      contextType || "code"
     );
 
     return true;
@@ -1206,14 +1216,13 @@ async function processGithubRepo(
     console.error("Error processing GitHub repository:", error);
 
     // Update status to failed
-    const urlId = crypto.createHash("sha256").update(repoUrl).digest("hex");
     await updateProcessingStatus(
       urlId,
       repoUrl,
       ProcessingStatus.FAILED,
       organization_id,
       error.message,
-      "code"
+      contextType || "code"
     );
 
     return false;
@@ -1225,7 +1234,7 @@ export async function crawl_website(
   base_url: string,
   max_depth: number = 7,
   organization_id: string,
-  contextType: string | null = null,
+  contextType: ContextType | null = null,
   currentDepth: number = 0
 ) {
   try {
@@ -1241,7 +1250,7 @@ export async function crawl_website(
             content,
             organization_id,
             undefined,
-            contextType
+            contextType as ContextType
           );
         }
       } else {
@@ -1253,7 +1262,7 @@ export async function crawl_website(
             username,
             organization_id,
             undefined,
-            contextType
+            contextType as ContextType
           );
         }
       }
@@ -1268,7 +1277,7 @@ export async function crawl_website(
       !base_url.includes("/blob/")
     ) {
       console.log("Processing GitHub repository:", base_url);
-      await processGithubRepo(base_url, organization_id);
+      await processGithubRepo(base_url, organization_id, contextType);
       return [];
     }
 
@@ -1547,25 +1556,25 @@ async function processDocument(
   cleanedCodeContent: string,
   organization_id: string,
   title?: string,
-  contextType?: string | null
+  contextType?: ContextType | null
 ): Promise<boolean> {
   try {
     const normalizedUrl = normalizeUrl(url);
     console.log(`Processing document: ${normalizedUrl}`);
-    const hash = crypto
+    const urlId = crypto
       .createHash("sha256")
       .update(normalizedUrl)
       .digest("hex");
 
     // Determine the type based on the URL or use provided contextType
-    const type =
+    const type: ContextType =
       contextType ||
       (url.includes("youtube.com") || url.includes("youtu.be")
         ? "video"
         : url.includes("github.com")
         ? "code"
         : url.includes("x.com") || url.includes("twitter.com")
-        ? "x"
+        ? "document"
         : "document");
 
     // For YouTube videos, format content with title prefix
@@ -1610,7 +1619,7 @@ async function processDocument(
                 updated_at = NOW()
               RETURNING id`,
               [
-                hash,
+                urlId,
                 organization_id,
                 type,
                 url,
@@ -2073,7 +2082,7 @@ export async function processXAccount(
               content,
               organization_id,
               post.title,
-              contextType
+              contextType as ContextType
             );
             await updateProcessingStatus(
               urlId,
