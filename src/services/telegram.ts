@@ -59,6 +59,7 @@ async function startTypingIndicator(
 
 export const handleTelegramMessage = async (ctx: Context): Promise<void> => {
   const messageId = ctx.message?.message_id;
+  const isPrivateChat = ctx.chat?.type === "private";
   try {
     if (!ctx.botInfo) {
       console.error("Bot not properly initialized");
@@ -75,8 +76,12 @@ export const handleTelegramMessage = async (ctx: Context): Promise<void> => {
       return;
     }
 
-    const isPrivateChat = ctx.chat?.type === "private";
     const isBotMention = ctx.message.text.includes(`@${ctx.botInfo.username}`);
+
+    if (!isPrivateChat && !isBotMention) {
+      console.log("Message ignored - not a private chat and bot not mentioned");
+      return;
+    }
 
     if (ctx.chat?.type === "supergroup") {
       const threadId = ctx.msg?.isAccessible()
@@ -93,24 +98,24 @@ export const handleTelegramMessage = async (ctx: Context): Promise<void> => {
       }
     }
 
-    if (!isPrivateChat && !isBotMention) return;
-
     const userId = ctx.from?.id.toString();
     if (!userId) return;
 
     const { limited, ttl } = await checkRateLimit(userId, true);
 
     if (limited) {
-      await ctx.reply(
-        `You've reached the message limit. Please try again in ${Math.ceil(
-          ttl || 0
-        )} seconds.`,
-        {
-          reply_parameters: {
-            message_id: messageId,
-          },
-        } as any
-      );
+      if (isBotMention) {
+        await ctx.reply(
+          `You've reached the message limit. Please try again in ${Math.ceil(
+            ttl || 0
+          )} seconds.`,
+          {
+            reply_parameters: {
+              message_id: messageId,
+            },
+          } as any
+        );
+      }
       return;
     }
 
@@ -161,18 +166,24 @@ export const handleTelegramMessage = async (ctx: Context): Promise<void> => {
     );
   } catch (error) {
     console.error("Error handling message:", error);
-    try {
-      await ctx.reply(
-        "Sorry, something went wrong while processing your message.",
-        {
-          reply_parameters: {
-            message_id: messageId,
-          },
-          parse_mode: "Markdown",
-        } as any
-      );
-    } catch (replyError) {
-      console.error("Failed to send error message:", replyError);
+    if (
+      ctx.message &&
+      "text" in ctx.message &&
+      ctx.message.text?.includes(`@${ctx.botInfo?.username}`)
+    ) {
+      try {
+        await ctx.reply(
+          "Sorry, something went wrong while processing your message.",
+          {
+            reply_parameters: {
+              message_id: messageId,
+            },
+            parse_mode: "Markdown",
+          } as any
+        );
+      } catch (replyError) {
+        console.error("Failed to send error message:", replyError);
+      }
     }
   }
 };
