@@ -1,8 +1,22 @@
-import { pool } from "../initalizers/postgres";
+import { db } from "../initalizers/postgres";
 import { redis } from "../initalizers/redis";
 import { User } from "../types";
+import { users } from "../db/migrations/schema";
+import { eq, inArray } from "drizzle-orm";
 
 export const user_cache_key = (userId: string) => `user:${userId}`;
+
+// Helper function to convert database user to User type
+function convertToUser(dbUser: any): User {
+  return {
+    id: dbUser.id,
+    username: dbUser.username,
+    pfp: dbUser.pfp || undefined,
+    bio: dbUser.bio || undefined,
+    created_at: new Date(dbUser.created_at || Date.now()),
+    updated_at: new Date(dbUser.updated_at || Date.now()),
+  };
+}
 
 /**
  * Fetches user data from Redis cache or PostgreSQL database if not cached.
@@ -15,21 +29,20 @@ export async function getUserById(userId: string): Promise<User> {
   // Try to get the user data from Redis
   const cachedUser = await redis.get(redisKey);
   if (cachedUser) {
-    return JSON.parse(cachedUser);
+    return convertToUser(JSON.parse(cachedUser));
   }
 
-  // If not in Redis, fetch from PostgreSQL
-  const query = `SELECT * FROM users WHERE id = $1`;
-  const result = await pool.query(query, [userId]);
+  // If not in Redis, fetch from PostgreSQL using Drizzle
+  const result = await db.select().from(users).where(eq(users.id, userId));
 
-  if (result.rows.length === 0) {
+  if (result.length === 0) {
     throw new Error(`User with ID ${userId} not found`);
   }
 
-  const user = result.rows[0];
+  const user = convertToUser(result[0]);
 
   // Cache the user data in Redis
-  await redis.set(redisKey, JSON.stringify(user), {
+  await redis.set(redisKey, JSON.stringify(result[0]), {
     EX: 3600, // Cache for 1 hour
   });
 
@@ -61,21 +74,27 @@ export async function getUsersByIds(
   } else {
     userIds.forEach((id, index) => {
       if (cachedUsers && cachedUsers[index]) {
-        userMap.set(id, JSON.parse(cachedUsers[index] as string));
+        userMap.set(
+          id,
+          convertToUser(JSON.parse(cachedUsers[index] as string))
+        );
       } else {
         missingUserIds.push(id);
       }
     });
   }
 
-  // If there are missing users, fetch them from PostgreSQL
+  // If there are missing users, fetch them from PostgreSQL using Drizzle
   if (missingUserIds.length > 0) {
-    const query = `SELECT * FROM users WHERE id = ANY($1::uuid[])`;
-    const result = await pool.query(query, [missingUserIds]);
+    const result = await db
+      .select()
+      .from(users)
+      .where(inArray(users.id, missingUserIds));
 
-    result.rows.forEach((user) => {
+    result.forEach((dbUser) => {
+      const user = convertToUser(dbUser);
       userMap.set(user.id, user);
-      redis.set(user_cache_key(user.id.toString()), JSON.stringify(user), {
+      redis.set(user_cache_key(user.id.toString()), JSON.stringify(dbUser), {
         EX: 60 * 60, // Cache for 1 hour
       });
     });

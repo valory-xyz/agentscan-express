@@ -4,7 +4,7 @@ import PQueue from "p-queue";
 import * as crypto from "crypto";
 import openai from "../initalizers/openai";
 import { estimateTokens, MAX_TOKENS, splitTextIntoChunks } from "./openai";
-import { executeQuery, safeQueueOperation } from "./postgres";
+import { safeQueueOperation } from "./postgres";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -16,6 +16,18 @@ import pgvector from "pgvector";
 import { YoutubeTranscript } from "youtube-transcript";
 import { google } from "googleapis";
 import { JSDOM } from "jsdom";
+import { db } from "../initalizers/postgres";
+import { redis } from "../initalizers/redis";
+import {
+  context_embeddings,
+  context_processing_status,
+} from "../db/migrations/schema";
+import { eq, and, sql } from "drizzle-orm";
+
+// Helper function to generate chunk hash
+function generateChunkHash(baseId: string, index: number): string {
+  return `${baseId}#${index}`;
+}
 
 // Simplify the status enum
 enum ProcessingStatus {
@@ -325,7 +337,7 @@ function isValidUrl(url: string): boolean {
 
     // Add X.com and Twitter.com URL detection
     if (
-      (url.includes("twitter.com/") || url.includes("x.com/")) &&
+      (url.includes("twitter.com/") || url.includes("x.com")) &&
       url.includes("/status/")
     ) {
       return true;
@@ -528,15 +540,17 @@ async function transcribeYoutubeVideo(
 
     // Check if video was already processed
     const status = await dbQueue.add(async () => {
-      const result = await executeQuery(async (client) => {
-        const res = await client.query(
-          `SELECT status FROM context_processing_status 
-           WHERE id = $1 AND type = 'video' AND company_id = $2`,
-          [urlId, organization_id]
+      const result = await db
+        .select()
+        .from(context_processing_status)
+        .where(
+          and(
+            eq(context_processing_status.id, urlId),
+            eq(context_processing_status.type, "video"),
+            eq(context_processing_status.company_id, organization_id)
+          )
         );
-        return res.rows[0]?.status;
-      });
-      return result;
+      return result[0]?.status;
     });
 
     if (status === ProcessingStatus.COMPLETED) {
@@ -883,53 +897,31 @@ async function updateProcessingStatus(
 ): Promise<void> {
   try {
     await dbQueue.add(async () => {
-      await executeQuery(async (client) => {
-        if (status === ProcessingStatus.COMPLETED) {
-          await client.query(
-            `INSERT INTO context_processing_status (
-              id,
-              company_id,
-              type,
-              location,
-              name,
-              status,
-              error_message,
-              updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-            ON CONFLICT (id, type) DO UPDATE SET
-              location = EXCLUDED.location,
-              name = EXCLUDED.name,
-              status = EXCLUDED.status,
-              error_message = EXCLUDED.error_message,
-              updated_at = NOW()`,
-            [
-              urlId,
-              organization_id,
-              type,
-              url,
-              url,
-              status,
-              errorMessage || null,
-            ]
-          );
-        } else {
-          await client.query(
-            `INSERT INTO context_processing_status (
-              id,
-              company_id,
-              type,
-              status,
-              error_message,
-              updated_at
-            ) VALUES ($1, $2, $3, $4, $5, NOW())
-            ON CONFLICT (id, type) DO UPDATE SET
-              status = EXCLUDED.status,
-              error_message = EXCLUDED.error_message,
-              updated_at = NOW()`,
-            [urlId, organization_id, type, status, errorMessage || null]
-          );
-        }
-      });
+      await db
+        .insert(context_processing_status)
+        .values({
+          id: urlId,
+          company_id: organization_id,
+          type: type,
+          location: status === ProcessingStatus.COMPLETED ? url : undefined,
+          name: status === ProcessingStatus.COMPLETED ? url : undefined,
+          status: status,
+          error_message: errorMessage || null,
+          updated_at: sql`CURRENT_TIMESTAMP`,
+        })
+        .onConflictDoUpdate({
+          target: [
+            context_processing_status.id,
+            context_processing_status.type,
+          ],
+          set: {
+            status: status,
+            error_message: errorMessage || null,
+            updated_at: sql`CURRENT_TIMESTAMP`,
+            location: status === ProcessingStatus.COMPLETED ? url : undefined,
+            name: status === ProcessingStatus.COMPLETED ? url : undefined,
+          },
+        });
     });
   } catch (error) {
     console.error("Fatal error in updateProcessingStatus:", error);
@@ -1018,15 +1010,17 @@ async function processGithubRepo(
   try {
     // Check if repository was already processed
     const status = await dbQueue.add(async () => {
-      const result = await executeQuery(async (client) => {
-        const res = await client.query(
-          `SELECT status FROM context_processing_status 
-           WHERE id = $1 AND type = $2 AND company_id = $3`,
-          [urlId, contextType || "code", organization_id]
+      const result = await db
+        .select()
+        .from(context_processing_status)
+        .where(
+          and(
+            eq(context_processing_status.id, urlId),
+            eq(context_processing_status.type, contextType || "code"),
+            eq(context_processing_status.company_id, organization_id)
+          )
         );
-        return res.rows[0]?.status;
-      });
-      return result;
+      return result[0]?.status;
     });
 
     if (status === ProcessingStatus.COMPLETED) {
@@ -1311,15 +1305,17 @@ export async function crawl_website(
 
     // Check database status
     const status = await dbQueue.add(async () => {
-      const result = await executeQuery(async (client) => {
-        const res = await client.query(
-          `SELECT status FROM context_processing_status 
-           WHERE id = $1 AND type = 'document' AND company_id = $2`,
-          [urlId, organization_id]
+      const result = await db
+        .select()
+        .from(context_processing_status)
+        .where(
+          and(
+            eq(context_processing_status.id, urlId),
+            eq(context_processing_status.type, "document"),
+            eq(context_processing_status.company_id, organization_id)
+          )
         );
-        return res.rows[0]?.status;
-      });
-      return result;
+      return result[0]?.status;
     });
 
     if (status === ProcessingStatus.COMPLETED) {
@@ -1599,38 +1595,34 @@ async function processDocument(
 
       const result = await safeQueueOperation(async () => {
         return await dbQueue.add(async () => {
-          return await executeQuery(async (client) => {
-            const res = await client.query(
-              `INSERT INTO context_embeddings (
-                id,
-                company_id,
-                type,
-                location,
-                content,
-                name,
-                embedding,
-                created_at,
-                updated_at
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7::vector, NOW(), NOW())
-              ON CONFLICT (id, type, location) DO UPDATE SET
-                content = EXCLUDED.content,
-                name = EXCLUDED.name,
-                embedding = EXCLUDED.embedding::vector,
-                updated_at = NOW()
-              RETURNING id`,
-              [
-                urlId,
-                organization_id,
-                type,
-                url,
-                cleaned_content,
-                title || url,
-                formattedEmbedding,
-              ]
-            );
-            console.log(`Inserted ${type} single: ${normalizedUrl}`, res.rows);
-            return res.rows.length > 0;
-          });
+          const insertResult = await db
+            .insert(context_embeddings)
+            .values({
+              id: urlId,
+              company_id: organization_id,
+              type: type,
+              location: url,
+              content: cleaned_content,
+              name: title || url,
+              embedding: sql`${formattedEmbedding}::vector`,
+              created_at: sql`CURRENT_TIMESTAMP`,
+              updated_at: sql`CURRENT_TIMESTAMP`,
+            })
+            .onConflictDoUpdate({
+              target: [
+                context_embeddings.id,
+                context_embeddings.type,
+                context_embeddings.location,
+              ],
+              set: {
+                content: cleaned_content,
+                name: title || url,
+                embedding: sql`${formattedEmbedding}::vector`,
+                updated_at: sql`CURRENT_TIMESTAMP`,
+              },
+            })
+            .returning();
+          return insertResult && insertResult.length > 0;
         });
       });
       return result === true;
@@ -1638,69 +1630,48 @@ async function processDocument(
       // Multiple chunks case
       const chunks = splitTextIntoChunks(cleaned_content, MAX_TOKENS);
       const results = await Promise.allSettled(
-        chunks.map((chunk, i) =>
-          safeQueueOperation(async () => {
-            const chunkLocation = `${url}#chunk${i + 1}`;
-            const chunkHash = crypto
-              .createHash("sha256")
-              .update(chunkLocation)
-              .digest("hex");
+        chunks.map(async (chunk, i) => {
+          const chunkHash = generateChunkHash(urlId, i);
+          const chunkLocation = `${url}#${i + 1}`;
+          const formattedEmbedding = await generateEmbeddingWithRetry(chunk);
 
-            const formattedEmbedding = embeddings[i];
-            if (!formattedEmbedding || typeof formattedEmbedding !== "string") {
-              console.error(
-                `Invalid embedding format for chunk ${i}:`,
-                formattedEmbedding
-              );
-              return false;
-            }
-
-            return await dbQueue.add(async () => {
-              return await executeQuery(async (client) => {
-                const res = await client.query(
-                  `INSERT INTO context_embeddings (
-                    id,
-                    company_id,
-                    type,
-                    location,
-                    content,
-                    name,
-                    embedding,
-                    is_chunk,
-                    original_location,
-                    created_at,
-                    updated_at
-                  ) VALUES ($1, $2, $3, $4, $5, $6, $7::vector, $8, $9, NOW(), NOW())
-                  ON CONFLICT (id, type, location) DO UPDATE SET
-                    content = EXCLUDED.content,
-                    name = EXCLUDED.name,
-                    embedding = EXCLUDED.embedding::vector,
-                    is_chunk = EXCLUDED.is_chunk,
-                    original_location = EXCLUDED.original_location,
-                    updated_at = NOW()
-                  RETURNING id`,
-                  [
-                    chunkHash,
-                    organization_id,
-                    type,
-                    chunkLocation,
-                    chunk,
-                    `${title || url} (Part ${i + 1})`,
-                    formattedEmbedding,
-                    true,
-                    url,
-                  ]
-                );
-                console.log(
-                  `Inserted ${type} chunk: ${normalizedUrl}`,
-                  res.rows
-                );
-                return res.rows.length > 0;
-              });
-            });
-          })
-        )
+          return await dbQueue.add(async () => {
+            const insertResult = await db
+              .insert(context_embeddings)
+              .values({
+                id: chunkHash,
+                company_id: organization_id,
+                type: type,
+                location: chunkLocation,
+                content: chunk,
+                name: `${title || url} (Part ${i + 1})`,
+                embedding: sql`${formattedEmbedding}::vector`,
+                is_chunk: true,
+                original_location: url,
+                created_at: sql`CURRENT_TIMESTAMP`,
+                updated_at: sql`CURRENT_TIMESTAMP`,
+              })
+              .onConflictDoUpdate({
+                target: [
+                  context_embeddings.id,
+                  context_embeddings.type,
+                  context_embeddings.location,
+                ],
+                set: {
+                  content: chunk,
+                  name: `${title || url} (Part ${i + 1})`,
+                  embedding: sql`${formattedEmbedding}::vector`,
+                  is_chunk: true,
+                  original_location: url,
+                  updated_at: sql`CURRENT_TIMESTAMP`,
+                },
+              })
+              .returning();
+            return insertResult && insertResult.length > 0;
+          });
+        })
       );
+
       return results.every(
         (result) => result.status === "fulfilled" && result.value === true
       );
