@@ -1,26 +1,28 @@
 import express from "express";
-import { pool } from "../../initalizers/postgres";
+import { db } from "../../initalizers/postgres";
 import privy from "../../initalizers/privy";
 import { redis } from "../../initalizers/redis";
 import dotenv from "dotenv";
+import { eq, sql } from "drizzle-orm";
+import { users } from "../../db/migrations/schema";
 
 dotenv.config();
 
 const router = express.Router();
 
 // Function to generate a unique username
-async function generateUniqueUsername(baseUsername: any) {
+async function generateUniqueUsername(baseUsername: string): Promise<string> {
   let username = baseUsername;
   let isUnique = false;
   let attempts = 0;
 
   while (!isUnique && attempts < 10) {
-    const result = await pool.query(
-      "SELECT username FROM users WHERE username = $1",
-      [username]
-    );
+    const result = await db
+      .select()
+      .from(users)
+      .where(eq(users.username, username));
 
-    if (result.rows.length === 0) {
+    if (result.length === 0) {
       isUnique = true;
     } else {
       // Append random letters and numbers
@@ -58,19 +60,19 @@ router.post("/", async (req, res) => {
     }
 
     // Check if the user exists in our database using the privy_did column
-    const userResult = await pool.query(
-      "SELECT * FROM users WHERE privy_did = $1",
-      [privy_did]
-    );
+    const userResult = await db
+      .select()
+      .from(users)
+      .where(eq(users.privy_did, privy_did));
+    console.log("result", userResult);
 
     let user: any;
 
-    if (userResult.rows.length === 0) {
+    if (userResult.length === 0) {
       // User doesn't exist, fetch additional information from Privy
       const privyUser = await privy.getUser(verifiedClaims.userId);
 
       const wallet_address = privyUser.wallet?.address.toLowerCase() ?? null;
-
       const email = privyUser.email?.address;
 
       //check if farcaster
@@ -126,11 +128,9 @@ router.post("/", async (req, res) => {
 
       // Insert new user into the database
       try {
-        const newUserResult = await pool.query(
-          `INSERT INTO users (privy_did, username, email, eth_wallets, pfp, bio, fid, wallet_address) 
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
-      RETURNING *`,
-          [
+        const newUserResult = await db
+          .insert(users)
+          .values({
             privy_did,
             username,
             email,
@@ -139,23 +139,23 @@ router.post("/", async (req, res) => {
             bio,
             fid,
             wallet_address,
-          ]
-        );
+          })
+          .returning();
 
-        if (newUserResult.rows.length === 0) {
+        if (newUserResult.length === 0) {
           return res.status(500).json({ message: "Failed to create user" });
         }
-        user = newUserResult.rows[0];
+        user = newUserResult[0];
       } catch (err: any) {
         if (err.code === "23505" && err.constraint === "users_privy_did_key") {
           // Handle unique constraint violation for privy_did
-          const existingUserResult = await pool.query(
-            "SELECT * FROM users WHERE privy_did = $1",
-            [privy_did]
-          );
+          const existingUserResult = await db
+            .select()
+            .from(users)
+            .where(eq(users.privy_did, privy_did));
 
-          if (existingUserResult.rows.length > 0) {
-            user = existingUserResult.rows[0];
+          if (existingUserResult.length > 0) {
+            user = existingUserResult[0];
           } else {
             return res.status(500).json({
               message:
@@ -168,20 +168,23 @@ router.post("/", async (req, res) => {
         }
       }
     } else {
-      user = userResult.rows[0];
+      user = userResult[0];
 
       //check if wallet_address is null and update it
       if (!user.wallet_address) {
         const privyUser = await privy.getUser(privy_did);
         const wallet_address = privyUser.wallet?.address.toLowerCase() ?? null;
         if (wallet_address) {
-          const updatedUserResult = await pool.query(
-            `UPDATE users SET wallet_address = $1 WHERE privy_did = $2 RETURNING *`,
-            [wallet_address, privy_did]
-          );
-          if (updatedUserResult.rows.length === 0) {
+          const updatedUserResult = await db
+            .update(users)
+            .set({ wallet_address })
+            .where(eq(users.privy_did, privy_did))
+            .returning();
+
+          if (updatedUserResult.length === 0) {
+            return res.status(500).json({ message: "Failed to update user" });
           }
-          user = updatedUserResult.rows[0];
+          user = updatedUserResult[0];
           // Clear the user cache
           redis.del(`user:${privy_did}`);
           redis.del(`user:${user.id}`);

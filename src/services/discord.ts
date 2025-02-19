@@ -6,7 +6,12 @@ import {
   findRelevantContext,
 } from "./conversation";
 import { checkRateLimit } from "../utils/messageLimiter";
-import { pool } from "../initalizers/postgres";
+import { db } from "../initalizers/postgres";
+import {
+  discord_servers,
+  discord_allowed_channels,
+} from "../db/migrations/schema";
+import { eq } from "drizzle-orm";
 
 import { scheduleJob } from "node-schedule";
 import {
@@ -280,19 +285,23 @@ export async function handleSlashCommand(interaction: any) {
 
     switch (interaction.commandName) {
       case "enable":
-        await pool.query(
-          `INSERT INTO discord_servers (id) 
-           VALUES ($1) 
-           ON CONFLICT (id) DO NOTHING`,
-          [serverId]
-        );
+        // Insert server if it doesn't exist
+        await db
+          .insert(discord_servers)
+          .values({
+            id: Number(serverId),
+          })
+          .onConflictDoNothing();
 
-        await pool.query(
-          `INSERT INTO discord_allowed_channels (channel_id, server_id, enabled_by) 
-           VALUES ($1, $2, $3) 
-           ON CONFLICT (channel_id) DO NOTHING`,
-          [channelId, serverId, enabledBy]
-        );
+        // Insert channel
+        await db
+          .insert(discord_allowed_channels)
+          .values({
+            channel_id: Number(channelId),
+            server_id: Number(serverId),
+            enabled_by: Number(enabledBy),
+          })
+          .onConflictDoNothing();
 
         await interaction.editReply({
           content: "Bot enabled in this channel!",
@@ -301,10 +310,9 @@ export async function handleSlashCommand(interaction: any) {
         break;
 
       case "disable":
-        await pool.query(
-          "DELETE FROM discord_allowed_channels WHERE channel_id = $1",
-          [channelId]
-        );
+        await db
+          .delete(discord_allowed_channels)
+          .where(eq(discord_allowed_channels.channel_id, Number(channelId)));
 
         await interaction.editReply({
           content: "Bot disabled in this channel!",
@@ -329,11 +337,11 @@ export async function handleSlashCommand(interaction: any) {
 }
 
 async function isChannelAllowed(channelId: string): Promise<boolean> {
-  const result = await pool.query(
-    "SELECT 1 FROM discord_allowed_channels WHERE channel_id = $1",
-    [channelId]
-  );
-  return result.rows.length > 0;
+  const result = await db
+    .select()
+    .from(discord_allowed_channels)
+    .where(eq(discord_allowed_channels.channel_id, Number(channelId)));
+  return result.length > 0;
 }
 
 async function processQueuedMessages() {

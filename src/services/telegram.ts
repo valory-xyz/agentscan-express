@@ -4,7 +4,9 @@ import { generateConversationResponse, getTeamData } from "./conversation";
 import { checkRateLimit } from "../utils/messageLimiter";
 import { amplitudeClient } from "../initalizers/amplitude";
 import { isGroupAdmin } from "../utils/telegramHelpers";
-import { pool } from "../initalizers/postgres";
+import { db } from "../initalizers/postgres";
+import { telegram_allowed_supergroups } from "../db/migrations/schema";
+import { and, eq, isNull, sql } from "drizzle-orm";
 
 const TEAM_ID = "56917ba2-9084-40c3-b9cf-67cd30cc389a";
 const threadContexts = new Map<number, any[]>();
@@ -16,14 +18,19 @@ async function isSupergroupAllowed(
 ): Promise<boolean> {
   console.log("Checking supergroup access for:", { chatId, threadId });
 
-  const result = await pool.query(
-    `SELECT enabled FROM telegram_allowed_supergroups 
-     WHERE chat_id = $1 
-     AND (thread_id = $2 OR (thread_id IS NULL AND $2 IS NULL))`,
-    [chatId, threadId]
-  );
+  const result = await db
+    .select()
+    .from(telegram_allowed_supergroups)
+    .where(
+      and(
+        eq(telegram_allowed_supergroups.chat_id, chatId),
+        threadId
+          ? eq(telegram_allowed_supergroups.thread_id, threadId)
+          : isNull(telegram_allowed_supergroups.thread_id)
+      )
+    );
 
-  return result.rows.length > 0 && result.rows[0].enabled === true;
+  return result.length > 0 && result[0].enabled === true;
 }
 
 function formatThreadContextForAI(threadContext: any[]): any[] {
@@ -318,16 +325,34 @@ export const handleEnableCommand = async (ctx: Context): Promise<void> => {
         : null
       : null;
 
-    const result = await pool.query(
-      `INSERT INTO telegram_allowed_supergroups (chat_id, thread_id, enabled_by, enabled)
-       VALUES ($1, $2, $3, true)
-       ON CONFLICT (chat_id, thread_id) 
-       DO UPDATE SET enabled_by = $3, enabled = true
-       RETURNING *`,
-      [ctx.chat.id, threadId, ctx.from?.id]
-    );
+    if (!ctx.from?.id || !ctx.chat.id) {
+      await ctx.reply(
+        "Failed to enable the bot: Missing required information."
+      );
+      return;
+    }
 
-    if (result.rows.length > 0) {
+    const result = await db
+      .insert(telegram_allowed_supergroups)
+      .values({
+        chat_id: Number(ctx.chat.id),
+        thread_id: threadId ? Number(threadId) : null,
+        enabled_by: Number(ctx.from.id),
+        enabled: true,
+      })
+      .onConflictDoUpdate({
+        target: [
+          telegram_allowed_supergroups.chat_id,
+          telegram_allowed_supergroups.thread_id,
+        ],
+        set: {
+          enabled_by: Number(ctx.from.id),
+          enabled: true,
+        },
+      })
+      .returning();
+
+    if (result.length > 0) {
       await ctx.reply(
         threadId
           ? "Bot has been enabled for this topic."
@@ -362,13 +387,17 @@ export const handleDisableCommand = async (ctx: Context): Promise<void> => {
         : null
       : null;
 
-    await pool.query(
-      `UPDATE telegram_allowed_supergroups 
-       SET enabled = false 
-       WHERE chat_id = $1 
-       AND (thread_id = $2 OR (thread_id IS NULL AND $2 IS NULL))`,
-      [ctx.chat.id, threadId]
-    );
+    await db
+      .update(telegram_allowed_supergroups)
+      .set({ enabled: false })
+      .where(
+        and(
+          eq(telegram_allowed_supergroups.chat_id, Number(ctx.chat.id)),
+          threadId
+            ? eq(telegram_allowed_supergroups.thread_id, Number(threadId))
+            : isNull(telegram_allowed_supergroups.thread_id)
+        )
+      );
 
     await ctx.reply(
       threadId

@@ -1,9 +1,11 @@
 import { Request, Response, NextFunction } from "express";
-import { pool } from "../initalizers/postgres";
+import { db, pool } from "../initalizers/postgres";
 import { redis } from "../initalizers/redis";
 import dotenv from "dotenv";
 dotenv.config();
 import privy from "../initalizers/privy";
+import { users } from "../db/migrations/schema";
+import { eq } from "drizzle-orm";
 
 const CACHE_DURATION = 1800; // 30 minutes in seconds
 
@@ -66,14 +68,14 @@ export async function authMiddleware(
     }
 
     // Check if the user exists in our database
-    const userResult = await pool.query(
-      "SELECT * FROM users WHERE privy_did = $1",
-      [userId]
-    );
+    const userResult = await db
+      .select()
+      .from(users)
+      .where(eq(users.privy_did, userId));
 
     let user;
 
-    if (userResult.rows.length === 0) {
+    if (userResult.length === 0) {
       if (allowNoUser) {
         req.user = null;
         return next();
@@ -81,7 +83,7 @@ export async function authMiddleware(
       console.log("User not found in database", userId);
       return res.status(401).json({ message: "Invalid token" });
     } else {
-      user = userResult.rows[0];
+      user = userResult[0];
     }
 
     // Cache the user in Redis
