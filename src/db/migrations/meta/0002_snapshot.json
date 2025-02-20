@@ -1,6 +1,6 @@
 {
-  "id": "92640c78-1255-485c-bb26-519ab83a634c",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "00002497-d817-41e8-b10b-e9e3c5f29689",
+  "prevId": "92640c78-1255-485c-bb26-519ab83a634c",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -643,8 +643,8 @@
           "primaryKey": false,
           "notNull": false
         },
-        "company_id": {
-          "name": "company_id",
+        "team_id": {
+          "name": "team_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true

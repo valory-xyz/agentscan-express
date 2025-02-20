@@ -1,13 +1,14 @@
-import { pool } from "../initalizers/postgres";
+import { db, pool } from "../initalizers/postgres";
 import { redis } from "../initalizers/redis";
 import openai from "../initalizers/openai";
 import {
   generateChatResponseWithRetry,
   generateEmbeddingWithRetry,
+  DocumentReference,
 } from "./openai";
 import { withRetry } from "./crawler";
 import { getInstanceData, getTransactions } from "./transactions";
-
+import { sql } from "drizzle-orm";
 const STAKING_PATTERNS = [
   "stake olas",
   "staking olas",
@@ -80,7 +81,7 @@ interface RelevantContext {
   content: string;
   name: string;
   location: string;
-  type: string;
+  label: string;
   similarity?: number;
   score?: number;
 }
@@ -185,8 +186,6 @@ export async function findRelevantContext(
   );
 
   const result = filterAndSortContext(codeEmbeddings, relevantEmbeddings);
-
-  // Cache the result...
   if (deploymentId !== "local") {
     try {
       await redis.set(cacheKey, JSON.stringify(result), {
@@ -213,15 +212,16 @@ async function fetchCodeEmbeddingsGeneral(
   const baseQuery = `
     WITH ranked_matches AS (
       SELECT 
-        content, 
-        name, 
-        location,
-        original_location,
-        type, 
-        (embedding <=> $1) as similarity
-      FROM context_embeddings 
-      WHERE company_id = $2 
-      AND (embedding <=> $1) < 0.8
+        ce.content, 
+        ce.name, 
+        ce.location,
+        ce.original_location,
+        cl.label, 
+        (ce.embedding <=> $1) as similarity
+      FROM context_embeddings ce
+      LEFT JOIN context_labels cl ON ce.id = cl.context_id
+      WHERE ce.team_name = $2 
+      AND (ce.embedding <=> $1) < 0.8
       ORDER BY similarity
     )
     SELECT *,
@@ -274,34 +274,29 @@ async function fetchCodeEmbeddingsAgent(
 
     const addressesArray = Array.from(addresses);
 
-    const query = await pool.query(
-      `WITH ranked_matches AS (
-        SELECT id, content, name, location, type, original_location, (embedding <=> $1) as similarity
-        FROM context_embeddings 
-        WHERE company_id = $2 
-        AND (
-          (type = 'component' AND LOWER(id) LIKE $4)
-          OR (type = 'abi' AND LOWER(name) LIKE ANY($5::text[]))
-          OR (type != 'component' AND type != 'abi')
+    const query = await db.execute(
+      sql`
+        WITH ranked_matches AS (
+          SELECT ce.id, ce.content, ce.name, ce.location, cl.label, ce.original_location, (ce.embedding <=> ${questionEmbedding}) as similarity
+          FROM context_embeddings ce
+          LEFT JOIN context_labels cl ON ce.id = cl.context_id
+          WHERE ce.team_name = ${teamName} 
+          AND (
+            (cl.label = 'component' AND LOWER(ce.id) LIKE ${`${agentId?.toLowerCase()}%`})
+            OR (cl.label = 'abi' AND LOWER(ce.name) LIKE ANY(${addressesArray}))
+            OR (cl.label NOT IN ('component', 'abi'))
+          )
+          ORDER BY similarity
         )
-        ORDER BY similarity
-      )
-      SELECT *,
-        CASE 
-          WHEN LOWER(content) LIKE $3 THEN similarity * 0.7
-          WHEN LOWER(name) LIKE $3 THEN similarity * 0.8
-          ELSE similarity
-        END as adjusted_similarity
-      FROM ranked_matches
-      ORDER BY adjusted_similarity
-      `,
-      [
-        questionEmbedding,
-        teamName,
-        `%${decodedQuestion.toLowerCase()}%`,
-        `${agentId?.toLowerCase()}%`,
-        addressesArray,
-      ]
+        SELECT *,
+          CASE 
+            WHEN LOWER(content) LIKE ${`%${decodedQuestion.toLowerCase()}%`} THEN similarity * 0.7
+            WHEN LOWER(name) LIKE ${`%${decodedQuestion.toLowerCase()}%`} THEN similarity * 0.8
+            ELSE similarity
+          END as adjusted_similarity
+        FROM ranked_matches
+        ORDER BY adjusted_similarity
+      `
     );
 
     return query.rows.slice(0, 15);
@@ -320,24 +315,25 @@ async function fetchCodeEmbeddingsBasic(
   teamName: string,
   decodedQuestion: string
 ) {
-  const query = await pool.query(
-    `WITH ranked_matches AS (
-      SELECT content, name, location, type, original_location, (embedding <=> $1) as similarity
-      FROM context_embeddings 
-      WHERE company_id = $2 
-      AND (embedding <=> $1) < 0.8
-      ORDER BY similarity
+  const query = await db.execute(
+    sql`
+      WITH ranked_matches AS (
+        SELECT ce.content, ce.name, ce.location, cl.label, ce.original_location, (ce.embedding <=> ${questionEmbedding}) as similarity
+        FROM context_embeddings ce
+        LEFT JOIN context_labels cl ON ce.id = cl.context_id
+        WHERE ce.team_name = ${teamName}
+        AND (ce.embedding <=> ${questionEmbedding}) < 0.8
+        ORDER BY similarity
     )
     SELECT *,
       CASE 
-        WHEN LOWER(content) LIKE $3 THEN similarity * 0.7
-        WHEN LOWER(name) LIKE $3 THEN similarity * 0.8
+        WHEN LOWER(content) LIKE ${`%${decodedQuestion.toLowerCase()}%`} THEN similarity * 0.7
+        WHEN LOWER(name) LIKE ${`%${decodedQuestion.toLowerCase()}%`} THEN similarity * 0.8
         ELSE similarity
       END as adjusted_similarity
     FROM ranked_matches
     ORDER BY adjusted_similarity
-    `,
-    [questionEmbedding, teamName, `%${decodedQuestion.toLowerCase()}%`]
+    `
   );
 
   return query.rows.slice(0, 15);
@@ -424,7 +420,7 @@ async function scoreEmbeddings(
 function filterAndSortContext(
   codeEmbeddings: any[],
   relevantEmbeddings: Array<{ score: number; index: number }>
-): RelevantContext[] {
+): DocumentReference[] {
   const minResults = 6;
   const percentageToKeep = 0.35;
 
@@ -445,9 +441,8 @@ function filterAndSortContext(
       content: embedding.content,
       name: embedding.name,
       location: embedding.location || "",
-      type: embedding.type || "component",
-      score:
-        relevantEmbeddings.find(({ index }) => index === index)?.score || 0,
+      label: embedding.label || "unknown",
+      score: relevantEmbeddings.find(({ index }) => index === index)?.score,
     }));
 
   return relevantContext

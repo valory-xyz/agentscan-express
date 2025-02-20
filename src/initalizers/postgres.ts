@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { config } from "../config";
 import * as schema from "../db/migrations/schema";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
 
 // Create the main connection pool
 const pool = new Pool({
