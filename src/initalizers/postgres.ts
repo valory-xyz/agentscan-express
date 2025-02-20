@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { config } from "../config";
 import * as schema from "../db/migrations/schema";
+import { isLocalDev } from "../../drizzle.config";
 
 // Create the main connection pool
 const pool = new Pool({
@@ -10,7 +11,11 @@ const pool = new Pool({
   user: config.postgres.user,
   password: config.postgres.password,
   database: config.postgres.database,
-  ssl: config.postgres.ssl,
+  ssl: isLocalDev
+    ? false
+    : {
+        rejectUnauthorized: false,
+      },
 });
 
 // Create the OLAS connection pool

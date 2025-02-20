@@ -1,5 +1,5 @@
 {
-  "id": "92640c78-1255-485c-bb26-519ab83a634c",
+  "id": "be6f2e17-48bd-4b1c-972d-cba18b126a94",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -288,6 +288,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "location": {
           "name": "location",
           "type": "text",
@@ -420,25 +426,9 @@
               "asc": true,
               "nulls": "last",
               "opclass": "text_ops"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_context_embeddings_company_embedding": {
-          "name": "idx_context_embeddings_company_embedding",
-          "columns": [
-            {
-              "expression": "team_name",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
             },
             {
-              "expression": "embedding",
+              "expression": "type",
               "isExpression": false,
               "asc": true,
               "nulls": "last",
@@ -516,6 +506,22 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "idx_context_embeddings_type": {
+          "name": "idx_context_embeddings_type",
+          "columns": [
+            {
+              "expression": "type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last",
+              "opclass": "text_ops"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -571,40 +577,7 @@
           "default": "now()"
         }
       },
-      "indexes": {
-        "idx_context_labels_context_id": {
-          "name": "idx_context_labels_context_id",
-          "columns": [
-            {
-              "expression": "context_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_context_labels_label": {
-          "name": "idx_context_labels_label",
-          "columns": [
-            {
-              "expression": "label",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
@@ -643,8 +616,8 @@
           "primaryKey": false,
           "notNull": false
         },
-        "company_id": {
-          "name": "company_id",
+        "team_id": {
+          "name": "team_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
