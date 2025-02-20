@@ -6,8 +6,7 @@ dotenv.config({
   path: process.env.NODE_ENV === "production" ? ".env.production" : ".env",
 });
 
-const isLocalDev =
-  process.env.NODE_ENV === "development" && process.env.USE_LOCAL_DB === "true";
+export const isLocalDev = process.env.USE_LOCAL_DB === "true";
 
 export default {
   schema: "./src/db/migrations/schema.ts",
@@ -31,7 +30,9 @@ export default {
         user: process.env.POSTGRES_USER || "postgres",
         password: process.env.POSTGRES_PASSWORD || "postgres",
         database: process.env.POSTGRES_DB || "postgres",
-        ssl: process.env.POSTGRES_SSL === "true",
+        ssl: {
+          rejectUnauthorized: false,
+        },
       },
   verbose: true,
   strict: true,

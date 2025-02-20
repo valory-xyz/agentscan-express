@@ -64,6 +64,61 @@
       "policies": {},
       "isRLSEnabled": false
     },
+    "public.context_labels": {
+      "name": "context_labels",
+      "schema": "",
+      "columns": {
+        "context_id": {
+          "name": "context_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        },
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "unique_context_label": {
+          "columns": [
+            "context_id",
+            "label"
+          ],
+          "nullsNotDistinct": false,
+          "name": "unique_context_label"
+        }
+      },
+      "checkConstraints": {},
+      "policies": {},
+      "isRLSEnabled": false
+    },
     "public.users": {
       "name": "users",
       "schema": "",
@@ -908,8 +963,8 @@
           "primaryKey": false,
           "notNull": false
         },
-        "company_id": {
-          "name": "company_id",
+        "team_id": {
+          "name": "team_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -979,8 +1034,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "company_id": {
-          "name": "company_id",
+        "team_name": {
+          "name": "team_name",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -989,7 +1044,7 @@
           "name": "type",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "location": {
           "name": "location",
@@ -1119,7 +1174,7 @@
           "name": "idx_context_embeddings_company",
           "columns": [
             {
-              "expression": "company_id",
+              "expression": "team_name",
               "asc": true,
               "nulls": "last",
               "opclass": "text_ops",
@@ -1127,29 +1182,6 @@
             },
             {
               "expression": "type",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_context_embeddings_company_embedding": {
-          "name": "idx_context_embeddings_company_embedding",
-          "columns": [
-            {
-              "expression": "company_id",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            },
-            {
-              "expression": "embedding",
               "asc": true,
               "nulls": "last",
               "opclass": "text_ops",
@@ -1251,7 +1283,6 @@
           "name": "context_embeddings_pkey",
           "columns": [
             "id",
-            "type",
             "location"
           ]
         }

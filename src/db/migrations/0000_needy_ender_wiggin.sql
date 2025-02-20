@@ -1,6 +1,6 @@
 -- Current sql file was generated after introspecting the database
 -- If you want to run this migration please uncomment this code before executing migrations
-
+/*
 CREATE TYPE "public"."user_type" AS ENUM('developer', 'consumer', 'business');--> statement-breakpoint
 CREATE TABLE "teams" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
@@ -10,6 +10,15 @@ CREATE TABLE "teams" (
 	"updated_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	"deleted_at" timestamp with time zone,
 	"user_type" "user_type" DEFAULT 'consumer' NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "context_labels" (
+	"context_id" text NOT NULL,
+	"label" text NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now(),
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now(),
+	CONSTRAINT "unique_context_label" UNIQUE("context_id","label")
 );
 --> statement-breakpoint
 CREATE TABLE "users" (
@@ -123,7 +132,7 @@ CREATE TABLE "context_processing_status" (
 	"id" text NOT NULL,
 	"type" text NOT NULL,
 	"location" text,
-	"company_id" text NOT NULL,
+	"team_id" text NOT NULL,
 	"name" text,
 	"status" text NOT NULL,
 	"error_message" text,
@@ -135,8 +144,8 @@ CREATE TABLE "context_processing_status" (
 --> statement-breakpoint
 CREATE TABLE "context_embeddings" (
 	"id" text NOT NULL,
-	"company_id" text NOT NULL,
-	"type" text NOT NULL,
+	"team_name" text NOT NULL,
+	"type" text,
 	"location" text NOT NULL,
 	"content" text NOT NULL,
 	"name" text,
@@ -146,7 +155,7 @@ CREATE TABLE "context_embeddings" (
 	"created_at" timestamp with time zone DEFAULT now(),
 	"updated_at" timestamp with time zone DEFAULT now(),
 	"deleted_at" timestamp with time zone,
-	CONSTRAINT "context_embeddings_pkey" PRIMARY KEY("id","type","location")
+	CONSTRAINT "context_embeddings_pkey" PRIMARY KEY("id","location")
 );
 --> statement-breakpoint
 ALTER TABLE "discord_allowed_channels" ADD CONSTRAINT "discord_allowed_channels_server_id_fkey" FOREIGN KEY ("server_id") REFERENCES "public"."discord_servers"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -163,12 +172,12 @@ CREATE INDEX "idx_code_embeddings_component_id" ON "code_embeddings" USING btree
 CREATE INDEX "idx_code_embeddings_hnsw_embedding" ON "code_embeddings" USING hnsw ("embedding" vector_cosine_ops) WITH (m=16,ef_construction=200);--> statement-breakpoint
 CREATE INDEX "context_embeddings_embedding_idx" ON "context_embeddings" USING hnsw ("embedding" vector_cosine_ops);--> statement-breakpoint
 CREATE INDEX "context_embeddings_embedding_idx1" ON "context_embeddings" USING hnsw ("embedding" vector_cosine_ops);--> statement-breakpoint
-CREATE INDEX "context_embeddings_name_idx" ON "context_embeddings" USING gin (to_tsvector('english'::regconfig));--> statement-breakpoint
+CREATE INDEX "context_embeddings_name_idx" ON "context_embeddings" USING gin (to_tsvector('english'::regconfig tsvector_ops);--> statement-breakpoint
 CREATE INDEX "idx_context_embeddings_active" ON "context_embeddings" USING btree ("deleted_at" timestamptz_ops) WHERE (deleted_at IS NULL);--> statement-breakpoint
-CREATE INDEX "idx_context_embeddings_company" ON "context_embeddings" USING btree ("company_id" text_ops,"type" text_ops);--> statement-breakpoint
-CREATE INDEX "idx_context_embeddings_company_embedding" ON "context_embeddings" USING btree ("company_id" text_ops,"embedding" text_ops);--> statement-breakpoint
+CREATE INDEX "idx_context_embeddings_company" ON "context_embeddings" USING btree ("team_name" text_ops,"type" text_ops);--> statement-breakpoint
 CREATE INDEX "idx_context_embeddings_hnsw_embedding" ON "context_embeddings" USING hnsw ("embedding" vector_cosine_ops) WITH (m=16,ef_construction=200);--> statement-breakpoint
 CREATE INDEX "idx_context_embeddings_id" ON "context_embeddings" USING btree ("id" text_ops);--> statement-breakpoint
 CREATE INDEX "idx_context_embeddings_location" ON "context_embeddings" USING btree ("location" text_ops);--> statement-breakpoint
 CREATE INDEX "idx_context_embeddings_name" ON "context_embeddings" USING btree ("name" text_ops);--> statement-breakpoint
 CREATE INDEX "idx_context_embeddings_type" ON "context_embeddings" USING btree ("type" text_ops);
+*/
