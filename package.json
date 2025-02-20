@@ -14,8 +14,6 @@
     "build": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "npx tsx src/scripts/migrate.ts",
-    "db:migrate:prod": "NODE_ENV=production ts-node src/scripts/migrate.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "db:check": "drizzle-kit check",
