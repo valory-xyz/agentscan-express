@@ -21,6 +21,7 @@ import { redis } from "../initalizers/redis";
 import {
   context_embeddings,
   context_processing_status,
+  context_labels,
 } from "../db/migrations/schema";
 import { eq, and, sql } from "drizzle-orm";
 
@@ -547,7 +548,7 @@ async function transcribeYoutubeVideo(
           and(
             eq(context_processing_status.id, urlId),
             eq(context_processing_status.type, "video"),
-            eq(context_processing_status.company_id, organization_id)
+            eq(context_processing_status.team_id, organization_id)
           )
         );
       return result[0]?.status;
@@ -901,7 +902,7 @@ async function updateProcessingStatus(
         .insert(context_processing_status)
         .values({
           id: urlId,
-          company_id: organization_id,
+          team_id: organization_id,
           type: type,
           location: status === ProcessingStatus.COMPLETED ? url : undefined,
           name: status === ProcessingStatus.COMPLETED ? url : undefined,
@@ -1017,7 +1018,7 @@ async function processGithubRepo(
           and(
             eq(context_processing_status.id, urlId),
             eq(context_processing_status.type, contextType || "code"),
-            eq(context_processing_status.company_id, organization_id)
+            eq(context_processing_status.team_id, organization_id)
           )
         );
       return result[0]?.status;
@@ -1312,7 +1313,7 @@ export async function crawl_website(
           and(
             eq(context_processing_status.id, urlId),
             eq(context_processing_status.type, "document"),
-            eq(context_processing_status.company_id, organization_id)
+            eq(context_processing_status.team_id, organization_id)
           )
         );
       return result[0]?.status;
@@ -1595,34 +1596,48 @@ async function processDocument(
 
       const result = await safeQueueOperation(async () => {
         return await dbQueue.add(async () => {
-          const insertResult = await db
-            .insert(context_embeddings)
-            .values({
-              id: urlId,
-              company_id: organization_id,
-              type: type,
-              location: url,
-              content: cleaned_content,
-              name: title || url,
-              embedding: sql`${formattedEmbedding}::vector`,
-              created_at: sql`CURRENT_TIMESTAMP`,
-              updated_at: sql`CURRENT_TIMESTAMP`,
-            })
-            .onConflictDoUpdate({
-              target: [
-                context_embeddings.id,
-                context_embeddings.type,
-                context_embeddings.location,
-              ],
-              set: {
+          return await db.transaction(async (tx) => {
+            // Insert into context_embeddings
+            const embeddingResult = await tx
+              .insert(context_embeddings)
+              .values({
+                id: urlId,
+                team_name: organization_id,
+                location: url,
                 content: cleaned_content,
                 name: title || url,
                 embedding: sql`${formattedEmbedding}::vector`,
+                created_at: sql`CURRENT_TIMESTAMP`,
                 updated_at: sql`CURRENT_TIMESTAMP`,
-              },
-            })
-            .returning();
-          return insertResult && insertResult.length > 0;
+              })
+              .onConflictDoUpdate({
+                target: [context_embeddings.id, context_embeddings.location],
+                set: {
+                  content: cleaned_content,
+                  name: title || url,
+                  embedding: sql`${formattedEmbedding}::vector`,
+                  updated_at: sql`CURRENT_TIMESTAMP`,
+                },
+              })
+              .returning();
+
+            // Insert into context_labels
+            const labelResult = await tx
+              .insert(context_labels)
+              .values({
+                context_id: urlId,
+                label: type,
+              })
+              .onConflictDoNothing({
+                target: [context_labels.context_id, context_labels.label],
+              })
+              .returning();
+
+            console.log("labelResult", labelResult);
+            console.log("embeddingResult", embeddingResult);
+
+            return embeddingResult && embeddingResult.length > 0;
+          });
         });
       });
       return result === true;
@@ -1636,38 +1651,52 @@ async function processDocument(
           const formattedEmbedding = await generateEmbeddingWithRetry(chunk);
 
           return await dbQueue.add(async () => {
-            const insertResult = await db
-              .insert(context_embeddings)
-              .values({
-                id: chunkHash,
-                company_id: organization_id,
-                type: type,
-                location: chunkLocation,
-                content: chunk,
-                name: `${title || url} (Part ${i + 1})`,
-                embedding: sql`${formattedEmbedding}::vector`,
-                is_chunk: true,
-                original_location: url,
-                created_at: sql`CURRENT_TIMESTAMP`,
-                updated_at: sql`CURRENT_TIMESTAMP`,
-              })
-              .onConflictDoUpdate({
-                target: [
-                  context_embeddings.id,
-                  context_embeddings.type,
-                  context_embeddings.location,
-                ],
-                set: {
+            return await db.transaction(async (tx) => {
+              // Insert into context_embeddings
+              const embeddingResult = await tx
+                .insert(context_embeddings)
+                .values({
+                  id: chunkHash,
+                  team_name: organization_id,
+                  location: chunkLocation,
                   content: chunk,
                   name: `${title || url} (Part ${i + 1})`,
                   embedding: sql`${formattedEmbedding}::vector`,
                   is_chunk: true,
                   original_location: url,
+                  created_at: sql`CURRENT_TIMESTAMP`,
                   updated_at: sql`CURRENT_TIMESTAMP`,
-                },
-              })
-              .returning();
-            return insertResult && insertResult.length > 0;
+                })
+                .onConflictDoUpdate({
+                  target: [context_embeddings.id, context_embeddings.location],
+                  set: {
+                    content: chunk,
+                    name: `${title || url} (Part ${i + 1})`,
+                    embedding: sql`${formattedEmbedding}::vector`,
+                    is_chunk: true,
+                    original_location: url,
+                    updated_at: sql`CURRENT_TIMESTAMP`,
+                  },
+                })
+                .returning();
+
+              // Insert into context_labels
+              const labelResult = await tx
+                .insert(context_labels)
+                .values({
+                  context_id: chunkHash,
+                  label: type,
+                })
+                .onConflictDoNothing({
+                  target: [context_labels.context_id, context_labels.label],
+                })
+                .returning();
+
+              console.log("labelResult", labelResult);
+              console.log("embeddingResult", embeddingResult);
+
+              return embeddingResult && embeddingResult.length > 0;
+            });
           });
         })
       );

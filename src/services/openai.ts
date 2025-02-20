@@ -317,11 +317,12 @@ export async function generateEmbeddingWithRetry(
 }
 
 // Add this type definition
-interface DocumentReference {
+export interface DocumentReference {
   name: string;
   location: string;
-  type: string;
+  label: string;
   content: string;
+  score?: number;
 }
 
 // First, update extractValidLinks to accept transactions
@@ -360,8 +361,8 @@ function formatAddress(address: string, chain: string = "mainnet"): string {
     chain === "mainnet"
       ? `https://etherscan.io/address/${address}`
       : chain === "gnosis"
-        ? `https://gnosisscan.io/address/${address}`
-        : `https://basescan.org/address/${address}`;
+      ? `https://gnosisscan.io/address/${address}`
+      : `https://basescan.org/address/${address}`;
   return `[${abbreviated}](${explorerUrl})`;
 }
 
@@ -474,7 +475,7 @@ Link: ${tx.transactionLink}`;
     Array.from(validLinks.entries()).map(([name, location]) => ({
       name,
       location,
-      type: "link",
+      label: "link",
       content: "",
     })),
     transactions
@@ -518,10 +519,10 @@ function formatContextForPrompt(
     .map((ctx, index) => {
       const name = ctx.name;
       const location = ctx.location;
-      const type = ctx.type.toUpperCase();
+      const label = ctx.label.toUpperCase();
 
       return `REFERENCE ${index + 1}:
-TYPE: ${type}
+TYPE: ${label}
 NAME: ${name}
 LINK: ${location}
 CONTENT:

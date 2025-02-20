@@ -107,13 +107,36 @@ npm run db:migrate
 ```
 or running this before migrate and or push
 ```bash
-psql -d agentscan_local -f src/db/migrations/0000_loose_yellowjacket.sql
+psql -d agentscan_local -f src/db/migrations/0000_tired_gauntlet.sql
 ```
 
 - View database with Drizzle Studio:
 ```bash
 npm run db:studio
 ```
+
+### Database Seeding
+
+The project includes functionality to export current database data and seed a local database. This is useful for development and testing purposes.
+
+#### Export Current Data
+To export the current state of your database to a seed file:
+```bash
+npm run db:export-seed
+# or
+node src/db/seed/seed.ts export
+```
+This will create a `seed-data.json` file in the `src/db/seed` directory containing your current database state.
+
+#### Seed the Database
+To populate your local database with the exported seed data:
+```bash
+npm run db:seed
+# or
+node src/db/seed/seed.ts seed
+```
+
+Note: Seeding operations will only work when `USE_LOCAL_DB=true` is set in your environment variables. This is a safety measure to prevent accidental modifications to production databases.
 
 ### Troubleshooting
 

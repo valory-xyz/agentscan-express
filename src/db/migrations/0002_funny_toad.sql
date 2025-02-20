@@ -1,0 +1,1 @@
+ALTER TABLE if not exists "context_processing_status" RENAME COLUMN "company_id" TO "team_id";

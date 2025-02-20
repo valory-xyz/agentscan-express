@@ -15,10 +15,12 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
-    "db:migrate": "drizzle-kit migrate",
-    "db:introspect": "drizzle-kit introspect",
     "db:studio": "drizzle-kit studio",
-    "db:pull": "drizzle-kit pull"
+    "db:check": "drizzle-kit check",
+    "db:introspect": "drizzle-kit introspect",
+    "db:pull": "drizzle-kit pull",
+    "db:export-seed": "npx tsx src/db/seed/seed.ts export",
+    "db:seed": "npx tsx src/db/seed/seed.ts seed"
   },
   "author": "",
   "license": "ISC",

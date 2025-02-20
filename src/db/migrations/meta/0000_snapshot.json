@@ -223,60 +223,6 @@
       "policies": {},
       "isRLSEnabled": false
     },
-    "public.telegram_allowed_supergroups": {
-      "name": "telegram_allowed_supergroups",
-      "schema": "",
-      "columns": {
-        "chat_id": {
-          "name": "chat_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "enabled_by": {
-          "name": "enabled_by",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "enabled_at": {
-          "name": "enabled_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false,
-          "default": "CURRENT_TIMESTAMP"
-        },
-        "thread_id": {
-          "name": "thread_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "enabled": {
-          "name": "enabled",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "unique_chat_thread": {
-          "columns": [
-            "chat_id",
-            "thread_id"
-          ],
-          "nullsNotDistinct": false,
-          "name": "unique_chat_thread"
-        }
-      },
-      "checkConstraints": {},
-      "policies": {},
-      "isRLSEnabled": false
-    },
     "public.discord_allowed_channels": {
       "name": "discord_allowed_channels",
       "schema": "",
@@ -333,6 +279,60 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
+      "checkConstraints": {},
+      "policies": {},
+      "isRLSEnabled": false
+    },
+    "public.telegram_allowed_supergroups": {
+      "name": "telegram_allowed_supergroups",
+      "schema": "",
+      "columns": {
+        "chat_id": {
+          "name": "chat_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enabled_by": {
+          "name": "enabled_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enabled_at": {
+          "name": "enabled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "unique_chat_thread": {
+          "columns": [
+            "chat_id",
+            "thread_id"
+          ],
+          "nullsNotDistinct": false,
+          "name": "unique_chat_thread"
+        }
+      },
       "checkConstraints": {},
       "policies": {},
       "isRLSEnabled": false
