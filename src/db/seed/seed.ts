@@ -1,4 +1,4 @@
-import { db } from "../initalizers/postgres";
+import { db } from "../../initalizers/postgres";
 import {
   teams,
   users,
@@ -10,7 +10,7 @@ import {
   context_labels,
   contract_abis,
   context_processing_status,
-} from "./migrations/schema";
+} from "../migrations/schema";
 
 // Safety check function to ensure we're in local development
 function ensureLocalDevelopment() {
@@ -55,6 +55,32 @@ export async function exportCurrentData() {
   }
 }
 
+// Add new clear database function
+export async function clearDatabase() {
+  try {
+    ensureLocalDevelopment();
+
+    await db.transaction(async (tx) => {
+      // Clear tables in safe order respecting foreign keys
+      await tx.delete(context_labels);
+      await tx.delete(context_embeddings);
+      await tx.delete(chat_messages);
+      await tx.delete(chat_sessions);
+      await tx.delete(discord_allowed_channels);
+      await tx.delete(discord_servers);
+      await tx.delete(contract_abis);
+      await tx.delete(context_processing_status);
+      await tx.delete(users);
+      await tx.delete(teams);
+    });
+
+    console.log("Database cleared successfully!");
+  } catch (error) {
+    console.error("Error clearing database:", error);
+    throw error;
+  }
+}
+
 // Function to seed the database with the exported data
 export async function seedDatabase() {
   try {
@@ -74,17 +100,8 @@ export async function seedDatabase() {
 
     // Begin transaction
     await db.transaction(async (tx) => {
-      // Clear existing data (optional - comment out if you want to keep existing data)
-      await tx.delete(context_labels);
-      await tx.delete(context_embeddings);
-      await tx.delete(chat_messages);
-      await tx.delete(chat_sessions);
-      await tx.delete(discord_allowed_channels);
-      await tx.delete(discord_servers);
-      await tx.delete(contract_abis);
-      await tx.delete(context_processing_status);
-      await tx.delete(users);
-      await tx.delete(teams);
+      // Clear existing data using the new function
+      await clearDatabase();
 
       // Insert seed data in correct order (respecting foreign key constraints)
       if (seedData.teams?.length) await tx.insert(teams).values(seedData.teams);
@@ -136,8 +153,15 @@ if (require.main === module) {
         console.error(error);
         process.exit(1);
       });
+  } else if (command === "clear") {
+    clearDatabase()
+      .then(() => process.exit(0))
+      .catch((error) => {
+        console.error(error);
+        process.exit(1);
+      });
   } else {
-    console.log("Please specify a command: export or seed");
+    console.log("Available commands: export, seed, clear");
     process.exit(1);
   }
 }
