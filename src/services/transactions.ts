@@ -1,6 +1,5 @@
 import axios from "axios";
 import { redis } from "../initalizers/redis";
-import { graphQLURL } from "./constants";
 import { olasPool } from "../initalizers/postgres";
 
 const CACHE_TTL = 15 * 60;
@@ -189,7 +188,6 @@ export async function getTransactions(
     let result;
     try {
       result = await olasPool.query(query, queryParams);
-
     } catch (error) {
       console.log("Failed to query log-df28 schema, falling back:", error);
       query = query.replace(
@@ -236,7 +234,7 @@ export async function getTransactions(
 
 export function formatTransaction(item: any): Transaction {
   const normalizedChain = item?.chain || item?.transaction?.chain || "mainnet";
-  
+
   const logs = (item.logs || []).map((log: any) => ({
     decodedData: log.decodedData || log.decoded_data,
     eventName: log.eventName || log.event_name,

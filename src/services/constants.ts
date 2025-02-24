@@ -1,6 +1,3 @@
-export const graphQLURL =
-  "https://pacific-possibility-production.up.railway.app";
-
 export const STAKING_KEYWORDS = [
   "stake",
   "staking",
