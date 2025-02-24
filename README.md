@@ -1,25 +1,54 @@
-# AgentScanBackend
+# Agentscan Backend
+
+A powerful backend service built with Node.js and TypeScript, featuring advanced data processing capabilities, AI integration, and real-time communication.
+
+## Features
+
+- **AI Integration**: Built-in support for various AI services including Anthropic and OpenAI
+- **Real-time Communication**: WebSocket support via Socket.IO
+- **Vector Database**: PostgreSQL with pgvector for efficient similarity searches
+- **File Processing**: Support for PDF parsing and multimedia handling
+- **External Integrations**: 
+  - Discord.js for Discord bot functionality
+  - Telegram integration via Telegraf
+  - YouTube transcript processing
+  - Google APIs integration
+- **Authentication**: Privy authentication integration
+- **Analytics**: Amplitude analytics integration
+- **Rate Limiting**: Redis-based rate limiting
+- **Web Scraping**: Playwright and Puppeteer support for advanced web scraping
 
 ## Getting Started
+
+*note: for simple usage use this with [The Agentscan frontend](https://github.com/ExploreLabsxyz/agentscan)*
 
 ### Prerequisites
 
 - Node.js (v18.x)
 - PostgreSQL (v16 or later)
+- Redis
 - npm
 - Git
 
 ### Installation
 
-1. Install dependencies:
+1. Clone the repository:
+```bash
+git clone git@github.com:ExploreLabsxyz/agentscan-express.git
+cd agentscan-express
+```
+
+2. Install dependencies:
 ```bash
 npm install
 ```
 
-2. Copy the environment variables:
+3. Copy the environment variables:
 ```bash
 cp .env.example .env
 ```
+
+4. Configure your environment variables in `.env`
 
 ## Database Setup
 
@@ -167,3 +196,33 @@ The server will be available at `http://localhost:4000` (or the port specified i
 - All tables are created in the public schema
 - The database supports vector embeddings with 512 dimensions
 - Includes support for HNSW indexes for fast similarity search
+
+## Development
+
+### Available Scripts
+
+- `npm run dev` - Start the development server with hot reload
+- `npm start` - Start the production server
+- `npm run build` - Build the TypeScript project
+- `npm run db:generate` - Generate database migrations
+- `npm run db:push` - Push database schema changes
+- `npm run db:studio` - Launch Drizzle Studio for database management
+- `npm run db:export-seed` - Export current database state
+- `npm run db:seed` - Seed the database with exported data
+
+### Project Structure
+
+```
+src/
+├── db/              # Database configuration and migrations
+├── services/        # Core services and business logic
+├── routes/          # API routes and controllers
+├── middleware/      # Express middleware
+├── utils/           # Utility functions and helpers
+|── types/           # TypeScript type definitions
+|-- initalizers/     # Initialize provider services (postgres, redis etc)
+```
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
