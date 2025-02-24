@@ -2,9 +2,7 @@ import type { Config } from "drizzle-kit";
 import * as dotenv from "dotenv";
 
 // Load environment variables
-dotenv.config({
-  path: process.env.NODE_ENV === "production" ? ".env.production" : ".env",
-});
+dotenv.config();
 
 export const isLocalDev = process.env.USE_LOCAL_DB === "true";
 
