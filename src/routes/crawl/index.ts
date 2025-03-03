@@ -5,6 +5,9 @@ const router = express.Router();
 
 router.post("/", async (req, res) => {
   try {
+    return res.status(400).json({
+      message: "Crawling is disabled",
+    });
     const {
       urls: rawUrls,
       maxDepth = 7,
