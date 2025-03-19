@@ -100,7 +100,6 @@ psql -d agentscan_local -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
 ```env
 # Add these to your .env file
-LOCAL_POSTGRES_URL="postgresql://postgres:postgres@localhost:5432/agentscan_local"
 LOCAL_POSTGRES_USER=postgres
 LOCAL_POSTGRES_HOST=localhost
 LOCAL_POSTGRES_DB=agentscan_local
@@ -252,7 +251,6 @@ For production deployment using Docker, you'll need to configure the following e
 | **App Configuration**      |
 |                            | PORT                | Backend server port                        | Yes      |
 | **Database Configuration** |
-|                            | POSTGRES_URL        | Main database connection URL               | Yes      |
 |                            | POSTGRES_USER       | Database username                          | Yes      |
 |                            | POSTGRES_HOST       | Database host address                      | Yes      |
 |                            | POSTGRES_DB         | Database name                              | Yes      |
