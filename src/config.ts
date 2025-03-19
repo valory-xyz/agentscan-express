@@ -38,8 +38,8 @@ export const config = {
     ssl: isLocalDev
       ? undefined
       : process.env.POSTGRES_SSL === "true"
-      ? { rejectUnauthorized: false }
-      : undefined,
+        ? { rejectUnauthorized: false }
+        : undefined,
   },
   server: {
     port: parseInt(process.env.PORT || "4000", 10),
@@ -48,8 +48,5 @@ export const config = {
     streamKey: process.env.CHAT_STREAM_KEY || "chat_messages",
     groupName: process.env.CHAT_GROUP_NAME || "chat_group",
     consumerPrefix: process.env.CHAT_CONSUMER_PREFIX || "consumer",
-  },
-  amplitude: {
-    apiKey: process.env.AMPLITUDE_API_KEY || "",
   },
 };

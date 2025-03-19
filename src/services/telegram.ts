@@ -1,8 +1,6 @@
 import { Context } from "telegraf";
-
 import { generateConversationResponse, getTeamData } from "./conversation";
 import { checkRateLimit } from "../utils/messageLimiter";
-import { amplitudeClient } from "../initalizers/amplitude";
 import { isGroupAdmin } from "../utils/telegramHelpers";
 import { db } from "../initalizers/postgres";
 import { telegram_allowed_supergroups } from "../db/migrations/schema";
@@ -146,24 +144,6 @@ export const handleTelegramMessage = async (ctx: Context): Promise<void> => {
 
     const teamData = await getTeamData(TEAM_ID);
 
-    amplitudeClient.track({
-      event_type: "conversation_made",
-      user_id: userId,
-      user_properties: {
-        username: ctx.from?.username || "unknown",
-      },
-      event_properties: {
-        teamId: TEAM_ID,
-        question: ctx.message.text
-          .replace(`@${ctx.botInfo.username}`, "")
-          .trim(),
-        source: "telegram",
-        messages: formattedContext,
-        chat_id: ctx.chat?.id || "unknown",
-        chat_type: ctx.chat?.type || "unknown",
-      },
-    });
-
     await streamResponse(
       ctx,
       ctx.message.text.replace(`@${ctx.botInfo.username}`, "").trim(),
@@ -263,22 +243,6 @@ async function streamResponse(
 
           threadContexts.set(sentMessage.message_id, updatedContext);
         }
-
-        amplitudeClient.track({
-          event_type: "conversation_completed",
-          user_id: ctx.from?.id.toString(),
-          user_properties: {
-            username: ctx.from?.username || "unknown",
-          },
-          event_properties: {
-            teamId: TEAM_ID,
-            question,
-            source: "telegram",
-            answer: fullResponse,
-            chat_id: ctx.chat?.id || "unknown",
-            chat_type: ctx.chat?.type || "unknown",
-          },
-        });
 
         return;
       }

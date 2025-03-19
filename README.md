@@ -8,7 +8,7 @@ A powerful backend service built with Node.js and TypeScript, featuring advanced
 - **Real-time Communication**: WebSocket support via Socket.IO
 - **Vector Database**: PostgreSQL with pgvector for efficient similarity searches
 - **File Processing**: Support for PDF parsing and multimedia handling
-- **External Integrations**: 
+- **External Integrations**:
   - Discord.js for Discord bot functionality
   - Telegram integration via Telegraf
   - YouTube transcript processing
@@ -20,7 +20,7 @@ A powerful backend service built with Node.js and TypeScript, featuring advanced
 
 ## Getting Started
 
-*note: for simple usage use this with [The Agentscan frontend](https://github.com/ExploreLabsxyz/agentscan)*
+_note: for simple usage use this with [The Agentscan frontend](https://github.com/ExploreLabsxyz/agentscan)_
 
 ### Prerequisites
 
@@ -33,17 +33,20 @@ A powerful backend service built with Node.js and TypeScript, featuring advanced
 ### Installation
 
 1. Clone the repository:
+
 ```bash
 git clone git@github.com:ExploreLabsxyz/agentscan-express.git
 cd agentscan-express
 ```
 
 2. Install dependencies:
+
 ```bash
 npm install
 ```
 
 3. Copy the environment variables:
+
 ```bash
 cp .env.example .env
 ```
@@ -55,6 +58,7 @@ cp .env.example .env
 ### Local Development Database
 
 1. Install PostgreSQL:
+
 ```bash
 # macOS (using Homebrew)
 brew install postgresql@16
@@ -65,6 +69,7 @@ sudo apt-get install postgresql-16
 ```
 
 2. Install pgvector from source:
+
 ```bash
 # Clone pgvector repository
 cd /tmp
@@ -79,6 +84,7 @@ sudo make install
 ```
 
 3. Create a local database and set up the postgres user:
+
 ```bash
 # Create the database
 createdb agentscan_local
@@ -91,6 +97,7 @@ psql -d agentscan_local -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
 4. Configure your local environment variables:
+
 ```env
 # Add these to your .env file
 LOCAL_POSTGRES_URL="postgresql://postgres:postgres@localhost:5432/agentscan_local"
@@ -104,6 +111,7 @@ USE_LOCAL_DB=true
 ```
 
 5. Initialize the database schema:
+
 ```bash
 # Generate and apply migrations
 npx drizzle-kit generate
@@ -120,11 +128,13 @@ To switch between local and production databases:
 ### Database Management
 
 - Generate migrations:
+
 ```bash
 npm run db:generate
 ```
 
 - Push schema changes:
+
 ```bash
 npm run db:push
 ```
@@ -134,12 +144,15 @@ if you get an error try doing:
 ```bash
 npm run db:migrate
 ```
+
 or running this before migrate and or push
+
 ```bash
 psql -d agentscan_local -f src/db/migrations/0000_tired_gauntlet.sql
 ```
 
 - View database with Drizzle Studio:
+
 ```bash
 npm run db:studio
 ```
@@ -149,16 +162,21 @@ npm run db:studio
 The project includes functionality to export current database data and seed a local database. This is useful for development and testing purposes.
 
 #### Export Current Data
+
 To export the current state of your database to a seed file:
+
 ```bash
 npm run db:export-seed
 # or
 node src/db/seed/seed.ts export
 ```
+
 This will create a `seed-data.json` file in the `src/db/seed` directory containing your current database state.
 
 #### Seed the Database
+
 To populate your local database with the exported seed data:
+
 ```bash
 npm run db:seed
 # or
@@ -172,6 +190,7 @@ Note: Seeding operations will only work when `USE_LOCAL_DB=true` is set in your 
 If you encounter issues with pgvector:
 
 1. Verify the installation:
+
 ```bash
 psql -d agentscan_local -c "SELECT * FROM pg_available_extensions WHERE name = 'vector';"
 ```
@@ -184,6 +203,7 @@ psql -d agentscan_local -c "SELECT * FROM pg_available_extensions WHERE name = '
 ## Running the Application
 
 Start the development server:
+
 ```bash
 npm run dev
 ```
@@ -222,6 +242,43 @@ src/
 |── types/           # TypeScript type definitions
 |-- initalizers/     # Initialize provider services (postgres, redis etc)
 ```
+
+## Production deployment
+
+For production deployment using Docker, you'll need to configure the following environment variables:
+
+| Category                   | Variable            | Description                                | Required |
+| -------------------------- | ------------------- | ------------------------------------------ | -------- |
+| **App Configuration**      |
+|                            | PORT                | Backend server port                        | Yes      |
+| **Database Configuration** |
+|                            | POSTGRES_URL        | Main database connection URL               | Yes      |
+|                            | POSTGRES_USER       | Database username                          | Yes      |
+|                            | POSTGRES_HOST       | Database host address                      | Yes      |
+|                            | POSTGRES_DB         | Database name                              | Yes      |
+|                            | POSTGRES_PASSWORD   | Database password                          | Yes      |
+|                            | POSTGRES_PORT       | Database port                              | Yes      |
+|                            | POSTGRES_SSL        | Enable/disable SSL for database connection | Yes      |
+| **OLAS Database**          |
+|                            | OLAS_DB_USER        | OLAS database username                     | Yes      |
+|                            | OLAS_DB_HOST        | OLAS database host                         | Yes      |
+|                            | OLAS_DB_PORT        | OLAS database port                         | Yes      |
+|                            | OLAS_DB_NAME        | OLAS database name                         | Yes      |
+|                            | OLAS_DB_PASSWORD    | OLAS database password                     | Yes      |
+|                            | OLAS_DB_SSL         | Enable SSL for OLAS database               | Yes      |
+| **Cache Configuration**    |
+|                            | REDIS_URL           | Redis connection URL                       | Yes      |
+| **External Services**      |
+|                            | ANTHROPIC_API_KEY   | Anthropic API authentication               | Yes      |
+|                            | OPEN_API_KEY        | OpenAI API authentication                  | Yes      |
+|                            | GITHUB_ACCESS_TOKEN | GitHub API access token                    | Yes      |
+|                            | YOUTUBE_API_KEY     | YouTube API key                            | Yes      |
+| **Authentication**         |
+|                            | PRIVY_APP_ID        | Privy application ID                       | Yes      |
+|                            | PRIVY_APP_SECRET    | Privy application secret                   | Yes      |
+| **Bot Integration**        |
+|                            | DISCORD_BOT_TOKEN   | Discord bot authentication token           | No       |
+|                            | TELEGRAM_BOT_TOKEN  | Telegram bot authentication token          | No       |
 
 ## License
 
