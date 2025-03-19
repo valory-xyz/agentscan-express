@@ -4,7 +4,7 @@
   "description": "",
   "main": "src/index.ts",
   "engines": {
-    "node": "18.x"
+    "node": ">=18.14"
   },
   "scripts": {
     "prestart": "npx playwright install chromium",
