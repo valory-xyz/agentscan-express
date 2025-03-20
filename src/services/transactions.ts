@@ -69,7 +69,7 @@ export async function getInstanceData(instanceId: string): Promise<Instance> {
       console.log("Failed to query log-df28 schema, falling back:", error);
       const fallbackQuery = newSchemaQuery.replace(
         /\"log-df28\"/g,
-        '"4ecc96db-a6ba-45ec-a91b-e5c4d49fa206"'
+        `"${process.env.OLAS_SCHEMA_ID}"`
       );
       result = await olasPool.query(fallbackQuery, [instanceId]);
     }
@@ -192,7 +192,7 @@ export async function getTransactions(
       console.log("Failed to query log-df28 schema, falling back:", error);
       query = query.replace(
         /\"log-df28\"/g,
-        '"4ecc96db-a6ba-45ec-a91b-e5c4d49fa206"'
+        `"${process.env.OLAS_SCHEMA_ID}"`
       );
       result = await olasPool.query(query, queryParams);
     }

@@ -72,13 +72,12 @@ export async function getAgents({
       JOIN "log-df28".transaction AS tx ON tx.hash = aft.transaction_hash
       WHERE 1=1
       ${chain ? `AND aft.chain = $${paramCounter++}` : ""}
-      ${
-        excludedIds.length > 0
-          ? `AND ai.id NOT IN (${excludedIds
-              .map((_: any, i: number) => `$${paramCounter + i}`)
-              .join(",")})`
-          : ""
-      }
+      ${excludedIds.length > 0
+      ? `AND ai.id NOT IN (${excludedIds
+        .map((_: any, i: number) => `$${paramCounter + i}`)
+        .join(",")})`
+      : ""
+    }
     )
     SELECT 
       id,
@@ -123,7 +122,7 @@ export async function getAgents({
       try {
         const fallbackQuery = query.replace(
           /\"log-df28\"/g,
-          '"4ecc96db-a6ba-45ec-a91b-e5c4d49fa206"'
+          `"${process.env.OLAS_SCHEMA_ID}"`
         );
         result = await olasPool.query(fallbackQuery, queryParams);
         break;

@@ -19,6 +19,11 @@ app.use(cors());
 app.use("/", require("./routes").default);
 
 async function initServer(): Promise<void> {
+  // Check for OLAS_SCHEMA_ID
+  if (!process.env.OLAS_SCHEMA_ID) {
+    throw new Error('OLAS_SCHEMA_ID environment variable is not set');
+  }
+
   httpServer.listen(config.server.port, () => {
     console.log(`Server running on port ${config.server.port}`);
   });
