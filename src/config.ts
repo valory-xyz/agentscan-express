@@ -17,7 +17,10 @@ export const config = {
     host: process.env.OLAS_DB_HOST,
     port: parseInt(process.env.OLAS_DB_PORT || "5432", 10),
     database: process.env.OLAS_DB_NAME,
-    ssl: { rejectUnauthorized: false },
+    ssl:
+      process.env.OLAS_DB_SSL === "true"
+        ? { rejectUnauthorized: false }
+        : undefined,
   },
   postgres: {
     user: isLocalDev

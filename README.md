@@ -257,6 +257,7 @@ For production deployment using Docker, you'll need to configure the following e
 |                            | POSTGRES_PASSWORD   | Database password                          | Yes      |
 |                            | POSTGRES_PORT       | Database port                              | Yes      |
 |                            | POSTGRES_SSL        | Enable/disable SSL for database connection | Yes      |
+|                            | USE_LOCAL_DB        | Use local database                         | Yes      |
 | **OLAS Database**          |
 |                            | OLAS_DB_USER        | OLAS database username                     | Yes      |
 |                            | OLAS_DB_HOST        | OLAS database host                         | Yes      |
