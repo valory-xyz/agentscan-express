@@ -19,6 +19,7 @@
     "db:check": "drizzle-kit check",
     "db:introspect": "drizzle-kit introspect",
     "db:pull": "drizzle-kit pull",
+    "db:migrate": "drizzle-kit migrate",
     "db:export-seed": "npx tsx src/db/seed/seed.ts export",
     "db:seed": "npx tsx src/db/seed/seed.ts seed"
   },
@@ -66,6 +67,7 @@
     "socket.io": "^4.8.0",
     "socket.io-client": "^4.8.0",
     "telegraf": "^4.16.3",
+    "tsx": "^4.19.3",
     "uuid": "^10.0.0",
     "youtube-transcript": "^1.2.1"
   },

@@ -198,7 +198,7 @@ export const context_embeddings = pgTable("context_embeddings", {
 }, (table) => [
 	index("context_embeddings_embedding_idx").using("hnsw", table.embedding.asc().nullsLast().op("vector_cosine_ops")),
 	index("context_embeddings_embedding_idx1").using("hnsw", table.embedding.asc().nullsLast().op("vector_cosine_ops")),
-	index("context_embeddings_name_idx").using("gin", sql`to_tsvector('english'::regconfig`),
+	index("context_embeddings_name_idx").using("gin", sql`to_tsvector('english'::regconfig, ${table.name})`),
 	index("idx_context_embeddings_active").using("btree", table.deleted_at.asc().nullsLast().op("timestamptz_ops")).where(sql`(deleted_at IS NULL)`),
 	index("idx_context_embeddings_company").using("btree", table.team_name.asc().nullsLast().op("text_ops"), table.type.asc().nullsLast().op("text_ops")),
 	index("idx_context_embeddings_hnsw_embedding").using("hnsw", table.embedding.asc().nullsLast().op("vector_cosine_ops")).with({m: "16",ef_construction: "200"}),

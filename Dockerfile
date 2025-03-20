@@ -45,4 +45,4 @@ RUN npm run build
 EXPOSE 3000
 
 # Run migrations and start the server
-CMD npm run db:push && npm run start
+CMD npm run db:migrate && npm run start
