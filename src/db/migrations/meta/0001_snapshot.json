@@ -1,6 +1,6 @@
 {
-  "id": "be6f2e17-48bd-4b1c-972d-cba18b126a94",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "a439dada-c1bd-4844-a9dd-600cd1bdb6d2",
+  "prevId": "af89bfa6-99cb-4896-b118-b436986d7831",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -389,7 +389,7 @@
           "name": "context_embeddings_name_idx",
           "columns": [
             {
-              "expression": "to_tsvector('english'::regconfig",
+              "expression": "to_tsvector('english'::regconfig, \"name\")",
               "asc": true,
               "isExpression": true,
               "nulls": "last"
