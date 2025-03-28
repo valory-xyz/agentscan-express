@@ -21,7 +21,8 @@
     "db:pull": "drizzle-kit pull",
     "db:migrate": "drizzle-kit migrate",
     "db:export-seed": "npx tsx src/db/seed/seed.ts export",
-    "db:seed": "npx tsx src/db/seed/seed.ts seed"
+    "db:seed": "npx tsx src/db/seed/seed.ts seed",
+    "db:seed-prod": "npx tsx src/db/seed/seed-prod.ts"
   },
   "author": "",
   "license": "ISC",

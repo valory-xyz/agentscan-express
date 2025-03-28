@@ -107,6 +107,8 @@ LOCAL_POSTGRES_PASSWORD=postgres
 LOCAL_POSTGRES_PORT=5432
 LOCAL_POSTGRES_SSL=false
 USE_LOCAL_DB=true
+# Random UUID for the team in the OLAS database
+TEAM_ID=<random-uuid>
 ```
 
 5. Initialize the database schema:
@@ -250,6 +252,7 @@ For production deployment using Docker, you'll need to configure the following e
 | -------------------------- | ------------------- | ------------------------------------------ | -------- |
 | **App Configuration**      |
 |                            | PORT                | Backend server port                        | Yes      |
+|                            | TEAM_ID             | UUID of the team in the OLAS database      | Yes      |
 | **Database Configuration** |
 |                            | POSTGRES_USER       | Database username                          | Yes      |
 |                            | POSTGRES_HOST       | Database host address                      | Yes      |
