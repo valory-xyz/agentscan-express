@@ -11,10 +11,21 @@ dotenv.config();
 const app = express();
 const httpServer = createServer(app);
 
+// Trust proxy
+app.set("trust proxy", true);
+
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
-app.use(cors());
+// Configure to allow only from agentscan.com
+app.use(
+  cors({
+    origin: "https://agentscan.org", // Only allow this domain
+    methods: ["GET", "POST", "PUT", "DELETE"], // Specify allowed HTTP methods
+    allowedHeaders: ["Content-Type", "Authorization"], // Specify allowed headers
+    credentials: true, // Allow cookies if needed
+  })
+);
 
 app.use("/", require("./routes").default);
 
